@@ -71,9 +71,9 @@ class Netperf(TestGeneric):
             # for request response test transactions per seconds are used as unit
             if "RR" in self._testname:
                 cmd = "netperf -H %s -f x" % self._netperf_server
-            # else 10^0bits/s are used as unit
+            # else 10^3bits/s are used as unit
             else:
-                cmd = "netperf -H %s -f b" % self._netperf_server
+                cmd = "netperf -H %s -f k" % self._netperf_server
             if self._is_omni():
                 # -P 0 disables banner header of output
                 cmd += " -P 0"
@@ -100,7 +100,7 @@ class Netperf(TestGeneric):
                     supported_tests = ', '.join(self.supported_tests)
                     logging.warning("Only %s tests are now officialy supported "
                     "by LNST. You can use other tests, but test result may not "
-                    "be correct." % supported_test)
+                    "be correct." % supported_tests)
                 cmd += " -t %s" % self._testname
 
             if self._confidence is not None and self._num_parallel <= 1:
@@ -209,12 +209,13 @@ class Netperf(TestGeneric):
         else:
             rate = float(throughput.group(1))
 
-        if throughput_units == "10^0bits/s":
+        if throughput_units == "10^3bits/s":
             res_val["unit"] = "bps"
+            res_val["rate"] = rate*1000
         elif throughput_units == "Trans/s":
             res_val["unit"] = "tps"
+            res_val["rate"] = rate
 
-        res_val["rate"] = rate
 
         if self._cpu_util is not None:
             if self._cpu_util == "local" or self._cpu_util == "both":
@@ -249,7 +250,7 @@ class Netperf(TestGeneric):
                 res_val["LOCAL_CPU_UTIL"] = float(r2.group(2))
                 res_val["REMOTE_CPU_UTIL"] = float(r2.group(3))
 
-        res_val["rate"] = rate
+        res_val["rate"] = rate*1000
         res_val["unit"] = "bps"
 
         return res_val
@@ -303,10 +304,7 @@ class Netperf(TestGeneric):
         # group(1) ... threshold value
         # group(3) ... threshold units
         # group(4) ... bytes/bits
-        if (self._testname == "TCP_STREAM" or
-            self._testname == "UDP_STREAM" or
-            self._testname == "SCTP_STREAM" or
-            self._testname == "SCTP_STREAM_MANY"):
+        if "STREAM" in self._testname:
             pattern_stream = "(\d*(\.\d*)?)\s*([ kmgtKMGT])(bits|bytes)\/sec"
             r1 = re.search(pattern_stream, threshold)
             if r1 is None:
@@ -335,10 +333,9 @@ class Netperf(TestGeneric):
             if threshold_unit_type == "bytes":
                 threshold_rate *= 8
             threshold_unit_type = "bps"
-        elif (self._testname == "TCP_RR" or self._testname == "UDP_RR" or
-              self._testname == "SCTP_RR"):
-            pattern_rr =  "(\d*(\.\d*)?)\s*trans\.\/sec"
-            r1 = re.search(pattern_rr, threshold.lower())
+        elif "RR" in self._testname:
+            pattern_rr =  "(\d*(\.\d*)?)\s*Trans\/sec"
+            r1 = re.search(pattern_rr, threshold)
             if r1 is None:
                 res_data["msg"] = "Invalid unit type in the "\
                                   "throughput option"
