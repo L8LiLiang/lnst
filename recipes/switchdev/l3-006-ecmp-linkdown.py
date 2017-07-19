@@ -39,7 +39,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
     tl = TestLib(ctl, aliases)
     tl.ping_simple(m1_if1, m3_if1)
-    tl.netperf_udp(m1_if1, m3_if1)
+    tl.netperf_udp(m3_if1, m1_if1)
 
     msg = "Running with all nexthops active"
     ecmp_common.test_traffic(tl, m1_if1, m3_if1, sw_if1, ecmp_sw_ifaces,
