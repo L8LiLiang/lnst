@@ -36,8 +36,9 @@ liali@redhat.com (Li Liang)
 #               if equal,                                                                                       pass
 #               if not eauql,                                                                                   fail
 #       3.use "distro,driver,host,mac" to distinguish ifname in database 
-#       4.if have not added ifname related to current "distro,driver,host,mac" to database, then will add it to database, or will update it
-
+#       4.if have not added ifname related to current "distro,driver,host,mac" to database, then will add it to database
+#       5.drivers under testing:
+#               mlxsw_spectrum
 
 
 from lnst.Controller.Task import ctl
