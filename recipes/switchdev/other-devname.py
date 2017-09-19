@@ -8,6 +8,34 @@ __author__ = """
 liali@redhat.com (Li Liang)
 """
 
+# Description:
+#       Make sure the interface default name don't change from distro to distro
+# 
+# Relateds bug:
+#       https://bugzilla.redhat.com/show_bug.cgi?id=1477285
+# 
+# Test method:
+#       1.after running this test,the interface name will be stored in database
+#       2.you need to run this test one time first on a benchmark version to generate the benchmark interface name
+#       3.this test will compare the current interface name with the name stored in database
+#               if equal,                           pass
+#               if not eauql,                       fail
+#               if can't get vf name from database, pass
+#       4.database table desc:
+#               +--------+------------------+------+-----+---------+----------------+
+#               | Field  | Type             | Null | Key | Default | Extra          |
+#               +--------+------------------+------+-----+---------+----------------+
+#               | id     | int(10) unsigned | NO   | PRI | NULL    | auto_increment |
+#               | distro | varchar(20)      | YES  |     | NULL    |                |
+#               | driver | varchar(20)      | YES  |     | NULL    |                |
+#               | host   | varchar(100)     | YES  |     | NULL    |                |
+#               | mac    | varchar(40)      | YES  |     | NULL    |                |
+#               | vfidx  | varchar(3)       | YES  |     | NULL    |                |
+#               | ifname | varchar(50)      | YES  |     | NULL    |                |
+#               +--------+------------------+------+-----+---------+----------------+
+#         note: the vfidx column is not used by this case
+
+
 from lnst.Controller.Task import ctl
 from TestLib import TestLib
 from time import sleep
