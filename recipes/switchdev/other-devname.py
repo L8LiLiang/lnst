@@ -13,15 +13,10 @@ liali@redhat.com (Li Liang)
 # 
 # Relateds bug:
 #       https://bugzilla.redhat.com/show_bug.cgi?id=1477285
-# 
+
 # Test method:
-#       1.after running this test,the interface name will be stored in database
-#       2.you need to run this test one time first on a benchmark version to generate the benchmark interface name
-#       3.this test will compare the current interface name with the name stored in database
-#               if equal,                           pass
-#               if not eauql,                       fail
-#               if can't get vf name from database, pass
-#       4.database table desc:
+#       0.this test need to use mysql database to store interface name
+#               table desc:
 #               +--------+------------------+------+-----+---------+----------------+
 #               | Field  | Type             | Null | Key | Default | Extra          |
 #               +--------+------------------+------+-----+---------+----------------+
@@ -34,6 +29,15 @@ liali@redhat.com (Li Liang)
 #               | ifname | varchar(50)      | YES  |     | NULL    |                |
 #               +--------+------------------+------+-----+---------+----------------+
 #         note: the vfidx column is not used by this case
+#
+#       1.this test need to be run one time on a benchmark version to generate the benchmark interface name
+#       2.this test will generate a interface and compare its name with the name stored in database
+#               if can't find interface name from database(you have not generate the benchmark interface name), pass
+#               if equal,                                                                                       pass
+#               if not eauql,                                                                                   fail
+#       3.use "distro,driver,host,mac" to distinguish ifname in database 
+#       4.if have not added ifname related to current "distro,driver,host,mac" to database, then will add it to database, or will update it
+
 
 
 from lnst.Controller.Task import ctl
