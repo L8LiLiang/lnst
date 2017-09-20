@@ -31,7 +31,7 @@ liali@redhat.com (Li Liang)
 #         note: the vfidx column is not used by this case
 #
 #       1.this test need to be run one time on a benchmark version to generate the benchmark interface name
-#       2.this test will generate a interface and compare its name with the name stored in database
+#       2.this test will compare interface name with the name stored in database
 #               if can't find interface name from database(you have not generate the benchmark interface name), pass
 #               if equal,                                                                                       pass
 #               if not eauql,                                                                                   fail
@@ -39,6 +39,13 @@ liali@redhat.com (Li Liang)
 #       4.if have not added ifname related to current "distro,driver,host,mac" to database, then will add it to database
 #       5.drivers under testing:
 #               mlxsw_spectrum
+#       6.data in my database:
+#               +----+--------+----------------+----------------------------------------------+-------------------+-------+-------------+
+#               | id | distro | driver         | host                                         | mac               | vfidx | ifname      |
+#               +----+--------+----------------+----------------------------------------------+-------------------+-------+-------------+
+#               | 1  | 7.4    | mlxsw_spectrum | mlxsw-sn2100-01.mgmt.lab.eng.pek2.redhat.com | 7c:fe:90:ff:2c:d9 | NULL  | enp1s0np1   |
+#               +----+--------+----------------+----------------------------------------------+-------------------+-------+-------------+
+
 
 
 from lnst.Controller.Task import ctl
