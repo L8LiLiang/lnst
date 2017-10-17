@@ -5,9 +5,7 @@ published by the Free Software Foundation; see COPYING for details.
 """
 
 __author__ = """
-eladr@mellanox.com (Elad Raz)
-jiri@mellanox.com (Jiri Pirko)
-nogahf@mellanox.com (Nogah Frankel)
+yotamg@mellanox.com (Yotam Gigi)
 """
 
 from lnst.Controller.Task import ctl
@@ -21,40 +19,57 @@ def test_ip(major, minor):
 def mcgrp(i):
     return "239.255.1.%d" % i
 
-def test_standard_mutlicast(tl, sender, listeners, bridged, group):
+def test_mcast_onoff(tl, sw_br, sender, listeners, bridged, group):
+    mcast_ifaces = listeners + bridged
+    sw = sw_br.get_host()
+
+    expected_mcast_on = [True for l in listeners] + [False for l in bridged]
+    expected_mcast_off = [True for l in listeners] + [True for l in bridged]
+
     s_procs = [tl.iperf_mc_listen(listener, group) for listener in listeners]
-    res = tl.iperf_mc(sender,  listeners+ bridged, group)
-    expected = [True for l in listeners] + [False for l in bridged]
-    tl.mc_ipref_compare_result(listeners + bridged, res, expected)
-    map(lambda i:i.intr(), s_procs)
+    tl._ctl.wait(2)
+
+    result = tl.iperf_mc(sender, mcast_ifaces, group)
+    tl.mc_ipref_compare_result(mcast_ifaces, result, expected_mcast_on)
+
+    sw_br.set_br_mcast_snooping(False)
+    result = tl.iperf_mc(sender,  mcast_ifaces, group)
+    tl.mc_ipref_compare_result(mcast_ifaces, result, expected_mcast_off)
+
+    sw_br.set_br_mcast_snooping(True)
+    result = tl.iperf_mc(sender, mcast_ifaces, group)
+    tl.mc_ipref_compare_result(mcast_ifaces, result, expected_mcast_on)
+
+    for proc in s_procs:
+        proc.intr()
 
 def do_task(ctl, hosts, ifaces, aliases):
     m1, m2, sw = hosts
     m1_if, m2_if, m3_if, m4_if, sw_if1, sw_if2, sw_if3, sw_if4 = ifaces
 
     # Create a bridge
-    sw_ports = [sw_if1, sw_if2, sw_if3, sw_if4]
-    sw_br = sw.create_bridge(slaves=sw_ports, options={"vlan_filtering": 1,
-                                                       "multicast_querier": 1})
+    sw_ifaces = [sw_if1, sw_if2, sw_if3, sw_if4]
+    sw_br = sw.create_bridge(slaves=sw_ifaces, options={"vlan_filtering": 1})
 
-    m1_if.set_addresses(test_ip(1,1))
+    m1_if.set_addresses(test_ip(1, 1))
     m2_if.set_addresses(test_ip(1, 2))
     m3_if.set_addresses(test_ip(1, 3))
     m4_if.set_addresses(test_ip(1, 4))
-    sleep(30)
+    sleep(15)
 
     tl = TestLib(ctl, aliases)
-
-    tl.check_cpu_traffic(sw_ports, test=False)
     for iface in [m1_if, m2_if, m3_if, m4_if]:
         iface.enable_multicast()
+    tl.check_cpu_traffic(sw_ifaces, test=False)
 
-    test_standard_mutlicast(tl, m1_if, [m2_if, m4_if], [m3_if], mcgrp(3))
-    test_standard_mutlicast(tl, m1_if, [m4_if], [m2_if, m3_if], mcgrp(4))
-    test_standard_mutlicast(tl, m2_if, [m3_if, m4_if, m1_if], [], mcgrp(5))
+    test_mcast_onoff(tl, sw_br, m1_if, [], [m3_if, m2_if, m4_if], mcgrp(1))
+    test_mcast_onoff(tl, sw_br, m1_if, [m2_if], [m3_if, m4_if], mcgrp(2))
+    test_mcast_onoff(tl, sw_br, m1_if, [m2_if, m4_if], [m3_if], mcgrp(3))
+    test_mcast_onoff(tl, sw_br, m3_if, [m1_if, m4_if], [m2_if], mcgrp(4))
+
     for iface in [m1_if, m2_if, m3_if, m4_if]:
         iface.disable_multicast()
-    tl.check_cpu_traffic(sw_ports)
+    tl.check_cpu_traffic(sw_ifaces)
 
 do_task(ctl, [ctl.get_host("machine1"),
               ctl.get_host("machine2"),

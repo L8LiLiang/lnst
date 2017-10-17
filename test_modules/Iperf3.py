@@ -1,10 +1,7 @@
 """
-This module defines iperf test
+This module defines iperf3 test
 """
 
-__author__ = """
-jtluka@redhat.com (Jan Tluka)
-"""
 
 import logging
 import time
@@ -15,7 +12,8 @@ from lnst.Common.ExecCmd import exec_cmd
 from lnst.Common.ShellProcess import ShellProcess
 from lnst.Common.Utils import is_installed
 
-class Iperf(TestGeneric):
+
+class Iperf3(TestGeneric):
     def _compose_iperf_cmd(self, role):
         iperf_options = self.get_opt("iperf_opts")
         if iperf_options is None:
@@ -24,13 +22,13 @@ class Iperf(TestGeneric):
         cmd = ""
         if role == "client":
             iperf_server = self.get_mopt("iperf_server", opt_type="addr")
-            cmd = "iperf --%s %s -t %s %s" % (role, iperf_server, self.duration, iperf_options)
+            cmd = "iperf3 --%s %s -t %s %s" % (role, iperf_server, self.duration, iperf_options)
         elif role == "server":
             bind = self.get_opt("bind", opt_type="addr")
             if bind != None:
-                cmd = "iperf --%s -B %s %s" % (role, bind, iperf_options)
+                cmd = "iperf3 --%s -B %s %s" % (role, bind, iperf_options)
             else:
-                cmd = "iperf --%s %s" % (role, iperf_options)
+                cmd = "iperf3 --%s %s" % (role, iperf_options)
 
         return cmd
 
@@ -91,6 +89,12 @@ class Iperf(TestGeneric):
             logging.info("Iperf connection failed!")
             return (False, "Iperf connection failed!")
 
+        m = re.search(" error - (.*)", output)
+        if m:
+            err = m.groups()[0]
+            logging.info("Iperf error: %s" % err)
+            return (False, "Iperf error: %s" % err)
+
         m = re.search(" (unrecognized option .*)", output)
         if m:
             err = m.groups()[0]
@@ -145,9 +149,9 @@ class Iperf(TestGeneric):
         role = self.get_mopt("role")
         cmd = self._compose_iperf_cmd(role)
         logging.debug("compiled command: %s" % cmd)
-        if not is_installed("iperf"):
+        if not is_installed("iperf3"):
             res_data = {}
-            res_data["msg"] = "Iperf is not installed on this machine!"
+            res_data["msg"] = "Iperf3 is not installed on this machine!"
             logging.error(res_data["msg"])
             return self.set_fail(res_data)
 

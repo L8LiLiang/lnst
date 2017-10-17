@@ -321,6 +321,47 @@ class HostAPI(object):
     def get_routes(self, routes_filter = "", netns = None):
         return self._m.get_routes(routes_filter, netns)
 
+    def mroute_init(self, table_id=None):
+        return self._m.mroute_init(table_id)
+
+    def mroute_finish(self, table_id=None):
+        return self._m.mroute_finish(table_id)
+
+    def mroute_pim_init(self, table_id=None):
+        return self._m.mroute_pim_init(table_id)
+
+    def mroute_pim_finish(self, table_id=None):
+        return self._m.mroute_pim_finish(table_id)
+
+    def mroute_table(self, index):
+        return self._m.mroute_table(index)
+
+    def mroute_add_vif_reg(self, vif_id, table_id=None):
+        return self._m.mroute_add_vif_reg(vif_id, table_id)
+
+    def mroute_del_vif_reg(self, vif_id, table_id=None):
+        return self._m.mroute_del_vif_reg(vif_id, table_id)
+
+    def mroute_add_mfc(self, group, source, source_vif, out_vifs,
+                       table_id=None):
+        return self._m.mroute_add_mfc(group, source, source_vif, out_vifs,
+                                      table_id)
+
+    def mroute_add_mfc_proxi(self, group, source, source_vif, out_vifs,
+                             table_id=None):
+        return self._m.mroute_add_mfc_proxi(group, source, source_vif,
+                                            out_vifs, table_id, True)
+
+    def mroute_del_mfc(self, group, source, source_vif, table_id=None):
+        return self._m.mroute_del_mfc(group, source, source_vif, table_id)
+
+    def mroute_del_mfc_proxi(self, group, source, source_vif, table_id=None):
+        return self._m.mroute_del_mfc_proxi(group, source, source_vif,
+                                            table_id, True)
+
+    def mroute_get_notif(self, table_id=None):
+        return self._m.mroute_get_notif(table_id)
+
     @deprecated
     def get_devname(self, if_id):
         """
@@ -610,6 +651,9 @@ class InterfaceAPI(object):
     def link_stats(self):
         return self._if.link_stats()
 
+    def link_cpu_ifstat(self):
+        return self._if.link_cpu_ifstat()
+
     def set_link_up(self):
         return self._if.set_link_up()
 
@@ -700,6 +744,18 @@ class InterfaceAPI(object):
     def set_br_state(_self, state, self=False, master=False):
         _self._if.set_br_state({"state": state, "self": self, "master": master})
 
+    def set_br_mcast_snooping(_self, set_on = True):
+        _self._if.set_br_mcast_snooping(set_on)
+
+    def set_br_mcast_querier(_self, set_on = True):
+        _self._if.set_br_mcast_querier(set_on)
+
+    def set_mcast_flood(self, on):
+        return self._if.set_mcast_flood(on)
+
+    def set_mcast_router(self, state):
+        return self._if.set_mcast_router(state)
+
     def set_speed(self, speed):
         return self._if.set_speed(speed)
 
@@ -729,6 +785,12 @@ class InterfaceAPI(object):
 
     def set_pause_off(self):
         return self._if.set_pause_off()
+
+    def mroute_add_vif(self, vif_index, table_id=None):
+        return self._if.mroute_add_vif(vif_index, table_id)
+
+    def mroute_del_vif(self, vif_index, table_id=None):
+        return self._if.mroute_del_vif(vif_index, table_id)
 
 class ModuleAPI(object):
     """ An API class representing a module. """

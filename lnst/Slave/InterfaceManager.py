@@ -705,6 +705,35 @@ class Device(object):
                               "tx_collsns": tx_stats[5]})
         return stats
 
+    def link_cpu_ifstat(self):
+        stats = {"devname": self._name,
+                 "hwaddr": self._hwaddr}
+        try:
+            out, _ = exec_cmd("ifstat -x c %s" % self._name)
+        except:
+            return {}
+        lines = iter(out.split("\n"))
+        line_first = ""
+        line_decond = ""
+        for line in lines:
+            if (len(line.split()) == 0):
+                continue
+            if (line.split()[0] == self._name):
+                break
+        else:
+            return {}
+        stats_data = line.split()[1:]
+        for i in range(len(stats_data)):
+            stats_data[i] = stats_data[i].replace("K",  "000")
+            stats_data[i] = stats_data[i].replace("M", "000000")
+
+        stats_data = map(int, stats_data)
+        stats["rx_packets"] = stats_data[0]
+        stats["tx_packets"] = stats_data[2]
+        stats["rx_bytes"] = stats_data[4]
+        stats["tx_bytes"] = stats_data[6]
+        return stats
+
     def set_addresses(self, ips):
         self._conf.set_addresses(ips)
         exec_cmd("ip addr flush %s" % self._name)
@@ -797,3 +826,16 @@ class Device(object):
     def set_pause_off(self):
         exec_cmd("ethtool -A %s rx off tx off autoneg off" % self._name,
                  die_on_err=False)
+
+    def set_mcast_flood(self, on = True):
+        cmd = "ip link set dev %s type bridge_slave mcast_flood " % self._name
+        if on:
+            cmd += "on"
+        else:
+            cmd += "off"
+        exec_cmd(cmd)
+
+    def set_mcast_router(self, state):
+        cmd = "ip link set dev %s type bridge_slave mcast_router %d" % \
+                   (self._name, state)
+        exec_cmd(cmd)
