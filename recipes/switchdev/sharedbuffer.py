@@ -302,4 +302,4 @@ do_task(ctl, [ctl.get_host("machine1"),
          ctl.get_host("machine2").get_interface("if1"),
          ctl.get_host("switch").get_interface("if1"),
          ctl.get_host("switch").get_interface("if2")],
-        ctl.get_aliases())
+ctl.get_aliases())
