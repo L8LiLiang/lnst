@@ -536,11 +536,64 @@ class HostAPI(object):
 
         return self._add_iface("vxlan", if_id, netns, ip, options, slaves)
 
+    def create_gre(self, ttl=None, tos=None,
+                   key=None, ikey=None, okey=None,
+                   seq=None, iseq=None, oseq=None,
+                   csum=None, icsum=None, ocsum=None,
+                   ul_iface=None,
+                   local_ip=None, remote_ip=None,
+                   if_id=None, netns=None, ip=None, options={}):
+
+        for v, itag, iv, otag, ov in [(key, "ikey", ikey, "okey", okey),
+                                      (seq, "iseq", iseq, "oseq", oseq),
+                                      (csum, "icsum", icsum, "ocsum", ocsum)]:
+            if v is not None:
+                if iv is not None and iv != v:
+                    raise TaskError("%s is overspecified" % itag)
+                if ov is not None and ov != v:
+                    raise TaskError("%s is overspecified" % otag)
+
+        options.update({"ttl": ttl, "tos": tos,
+                        "key": key, "ikey": ikey, "okey": okey,
+                        "seq": seq, "iseq": iseq, "oseq": oseq,
+                        "csum": csum, "icsum": icsum, "ocsum": ocsum,
+                        "local_ip": local_ip, "remote_ip": remote_ip})
+
+        if ul_iface is not None:
+            slaves = [ul_iface]
+        else:
+            slaves = []
+
+        return self._add_iface("gre", if_id, netns, ip, options, slaves)
+
+    def create_ipip(self, ttl=None, tos=None, ul_iface=None,
+                    local_ip=None, remote_ip=None,
+                    if_id=None, netns=None, ip=None, options={}):
+
+        options.update({"ttl": ttl, "tos": tos,
+                        "local_ip": local_ip, "remote_ip": remote_ip})
+
+        if ul_iface is not None:
+            slaves = [ul_iface]
+        else:
+            slaves = []
+
+        return self._add_iface("ipip", if_id, netns, ip, options, slaves)
+
+    def create_dummy(self, if_id=None, netns=None, ip=None):
+        return self._add_iface("dummy", if_id, netns, ip, {}, [])
+
     def enable_service(self, service):
         return self._m.enable_service(service)
 
     def disable_service(self, service):
         return self._m.disable_service(service)
+
+    def restart_service(self, service):
+        return self._m.restart_service(service)
+
+    def copy_file_to_machine(self, local_path, remote_path=None, netns=None):
+        return self._m.copy_file_to_machine(local_path, remote_path, netns)
 
     def get_num_cpus(self):
         return self._m.get_num_cpus()
@@ -791,6 +844,18 @@ class InterfaceAPI(object):
 
     def mroute_del_vif(self, vif_index, table_id=None):
         return self._if.mroute_del_vif(vif_index, table_id)
+
+    def get_coalesce(self):
+        return self._if.get_coalesce()
+
+    def set_coalesce(self, cdata):
+        return self._if.set_coalesce(cdata)
+
+    def save_coalesce(self):
+        return self._if.save_coalesce()
+
+    def restore_coalesce(self):
+        return self._if.restore_coalesce()
 
 class ModuleAPI(object):
     """ An API class representing a module. """

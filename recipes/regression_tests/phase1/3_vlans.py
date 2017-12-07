@@ -19,8 +19,9 @@ product_name = ctl.get_alias("product_name")
 m1 = ctl.get_host("testmachine1")
 m2 = ctl.get_host("testmachine2")
 
-m1.sync_resources(modules=["IcmpPing", "Icmp6Ping", "Netperf"])
-m2.sync_resources(modules=["IcmpPing", "Icmp6Ping", "Netperf"])
+m1.sync_resources(modules=["IcmpPing", "Icmp6Ping", "Netperf", "Custom"])
+m2.sync_resources(modules=["IcmpPing", "Icmp6Ping", "Netperf", "Custom"])
+
 
 # ------
 # TESTS
@@ -45,6 +46,7 @@ pr_user_comment = ctl.get_alias("perfrepo_comment")
 offloads_alias = ctl.get_alias("offloads")
 nperf_protocols = ctl.get_alias("nperf_protocols")
 official_result = bool_it(ctl.get_alias("official_result"))
+adaptive_coalescing_off = bool_it(ctl.get_alias("adaptive_coalescing_off"))
 
 sctp_default_msg_size = "16K"
 
@@ -70,6 +72,20 @@ for vlan in vlans:
     vlan_if1.set_mtu(mtu)
     vlan_if2 = m2.get_interface(vlan)
     vlan_if2.set_mtu(mtu)
+
+if adaptive_coalescing_off:
+    coalesce_status = ctl.get_module('Custom')
+
+    for d in [ m1_phy1, m2_phy1 ]:
+        # disable any interrupt coalescing settings
+        cdata = d.save_coalesce()
+        cdata['use_adaptive_tx_coalesce'] = 0
+        cdata['use_adaptive_rx_coalesce'] = 0
+        if not d.set_coalesce(cdata):
+            coalesce_status.set_options({'fail': True,
+                                         'msg': "Failed to set coalesce options"\
+                                                " on device %s" % d.get_devname()})
+            d.get_host().run(coalesce_status)
 
 if nperf_cpupin:
     m1.run("service irqbalance stop")
@@ -224,6 +240,14 @@ if nperf_msg_size is not None:
     netperf_cli_udp6.update_options({"msg_size" : nperf_msg_size})
     netperf_cli_sctp6.update_options({"msg_size" : nperf_msg_size})
 
+# if we will run SCTP test make sure the SCTP will go out through the test
+# interfaces only
+if nperf_protocols.find("sctp") > -1:
+    m1.run("iptables -I OUTPUT ! -o %s -p sctp -j DROP" %
+            m1_vlan1.get_devname())
+    m2.run("iptables -I OUTPUT ! -o %s -p sctp -j DROP" %
+            m2_vlan1.get_devname())
+
 for setting in offload_settings:
     #apply offload setting
     dev_features = ""
@@ -241,15 +265,15 @@ for setting in offload_settings:
 
     # Ping test
     for vlan1 in vlans:
-        m1_vlan1 = m1.get_interface(vlan1)
+        m1_vlan1_if = m1.get_interface(vlan1)
         for vlan2 in vlans:
-            m2_vlan2 = m2.get_interface(vlan2)
+            m2_vlan2_if = m2.get_interface(vlan2)
 
-            ping_mod.update_options({"addr": m2_vlan2.get_ip(0),
-                                     "iface": m1_vlan1.get_devname()})
+            ping_mod.update_options({"addr": m2_vlan2_if.get_ip(0),
+                                     "iface": m1_vlan1_if.get_devname()})
 
-            ping_mod6.update_options({"addr": m2_vlan2.get_ip(1),
-                                      "iface": m1_vlan1.get_ip(1)})
+            ping_mod6.update_options({"addr": m2_vlan2_if.get_ip(1),
+                                      "iface": m1_vlan1_if.get_ip(1)})
 
             if vlan1 == vlan2:
                 # These tests should pass
@@ -341,6 +365,9 @@ for setting in offload_settings:
                                                   'redhat_release'])
             for offload in setting:
                 result_sctp.set_parameter(offload[0], offload[1])
+
+            if nperf_msg_size is not None:
+                result_sctp.set_parameter("nperf_msg_size", nperf_msg_size)
 
             result_sctp.set_parameter('netperf_server_on_vlan', vlans[0])
             result_sctp.set_parameter('netperf_client_on_vlan', vlans[0])
@@ -436,6 +463,9 @@ for setting in offload_settings:
             for offload in setting:
                 result_sctp.set_parameter(offload[0], offload[1])
 
+            if nperf_msg_size is not None:
+                result_sctp.set_parameter("nperf_msg_size", nperf_msg_size)
+
             result_sctp.set_parameter('netperf_server_on_vlan', vlans[0])
             result_sctp.set_parameter('netperf_client_on_vlan', vlans[0])
             result_sctp.add_tag(product_name)
@@ -464,3 +494,14 @@ m2.run("ethtool -K %s %s" % (m2_phy1.get_devname(), dev_features))
 if nperf_cpupin:
     m1.run("service irqbalance start")
     m2.run("service irqbalance start")
+
+if nperf_protocols.find("sctp") > -1:
+    m1.run("iptables -D OUTPUT ! -o %s -p sctp -j DROP" %
+            m1_vlan1.get_devname())
+    m2.run("iptables -D OUTPUT ! -o %s -p sctp -j DROP" %
+            m2_vlan1.get_devname())
+
+if adaptive_coalescing_off:
+    for d in [ m1_phy1, m2_phy1 ]:
+        # restore any interrupt coalescing settings
+        d.restore_coalesce()

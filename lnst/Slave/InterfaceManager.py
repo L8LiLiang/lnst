@@ -15,6 +15,7 @@ olichtne@redhat.com (Ondrej Lichtner)
 import re
 import select
 import logging
+import ethtool
 from lnst.Slave.NetConfigDevice import NetConfigDevice
 from lnst.Slave.NetConfigCommon import get_option
 from lnst.Common.NetUtils import normalize_hwaddr
@@ -736,7 +737,7 @@ class Device(object):
 
     def set_addresses(self, ips):
         self._conf.set_addresses(ips)
-        exec_cmd("ip addr flush %s" % self._name)
+        exec_cmd("ip addr flush %s scope global" % self._name)
         for address in ips:
             exec_cmd("ip addr add %s dev %s" % (address, self._name))
 
@@ -839,3 +840,16 @@ class Device(object):
         cmd = "ip link set dev %s type bridge_slave mcast_router %d" % \
                    (self._name, state)
         exec_cmd(cmd)
+
+    def get_coalesce(self):
+        try:
+            return ethtool.get_coalesce(self._name)
+        except IOError as e:
+            logging.error("Failed to get coalesce settings: %s", e)
+            return {}
+
+    def set_coalesce(self, cdata):
+        try:
+            ethtool.set_coalesce(self._name, cdata)
+        except IOError as e:
+            logging.error("Failed to set coalesce settings: %s", e)

@@ -781,7 +781,8 @@ class SlaveMethods:
         dc_routes = []
         nh_routes = []
         ip_re = "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
-        prefix_re = "^(" + ip_re + "(?:/\d{1,3})?)"
+        ip6_re = "(?:(?:[\da-f]{1,4}:)*|:)(?::|(?:[\da-f]{1,4})|(?::[\da-f]{1,4})*)"
+        prefix_re = "^((?:local )?" + "(?:%s|%s)" % (ip_re, ip6_re) + "(?:/\d{1,3})?)"
 
         # parse directly connected routes
         dc_route_re = prefix_re + " dev (\w+) (.*)"
@@ -801,10 +802,10 @@ class SlaveMethods:
         for nh_route_match in nh_route_matchs:
             nexthop = { "ip" : nh_route_match[1],
                         "dev" : nh_route_match[2],
-                        "flags" : ""}
+                        "flags" : nh_route_match[3]}
             nh_route = {"prefix"  : nh_route_match[0],
                         "nexthops": [ nexthop ],
-                        "flags"   : nh_route_match[3] }
+                        "flags" : ""}
             nh_routes.append(nh_route)
 
         # parse ECMP routes
@@ -1014,8 +1015,7 @@ class SlaveMethods:
         stdout, _ = exec_cmd("pidof systemd", die_on_err=False)
         return len(stdout) != 0
 
-    def _configure_service(self, service, start=True):
-        action = "start" if start else "stop"
+    def _configure_service(self, service, action):
         if self._is_systemd():
             exec_cmd("systemctl {} {}".format(action, service))
         else:
@@ -1023,10 +1023,13 @@ class SlaveMethods:
         return True
 
     def enable_service(self, service):
-        return self._configure_service(service)
+        return self._configure_service(service, "start")
 
     def disable_service(self, service):
-        return self._configure_service(service, start=False)
+        return self._configure_service(service, "stop")
+
+    def restart_service(self, service):
+        return self._configure_service(service, "restart")
 
     def get_num_cpus(self):
         return int(os.sysconf('SC_NPROCESSORS_ONLN'))
@@ -1202,6 +1205,23 @@ class SlaveMethods:
         res["raw"] = notif
         res["data"] = notif[28:]
         return res
+
+    def get_coalesce(self, if_id):
+        dev = self._if_manager.get_mapped_device(if_id)
+        if dev is not None:
+            return dev.get_coalesce()
+        else:
+            logging.error("Device with id '%s' not found." % if_id)
+            return None
+
+    def set_coalesce(self, if_id, cdata):
+        dev = self._if_manager.get_mapped_device(if_id)
+        if dev is not None:
+            dev.set_coalesce(cdata)
+            return True
+        else:
+            logging.error("Device with id '%s' not found." % if_id)
+            return False
 
 class ServerHandler(ConnectionHandler):
     def __init__(self, addr):

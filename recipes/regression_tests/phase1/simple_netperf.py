@@ -19,8 +19,8 @@ product_name = ctl.get_alias("product_name")
 m1 = ctl.get_host("machine1")
 m2 = ctl.get_host("machine2")
 
-m1.sync_resources(modules=["Netperf"])
-m2.sync_resources(modules=["Netperf"])
+m1.sync_resources(modules=["Netperf", "Custom"])
+m2.sync_resources(modules=["Netperf", "Custom"])
 
 # ------
 # TESTS
@@ -43,6 +43,7 @@ pr_user_comment = ctl.get_alias("perfrepo_comment")
 offloads_alias = ctl.get_alias("offloads")
 nperf_protocols = ctl.get_alias("nperf_protocols")
 official_result = bool_it(ctl.get_alias("official_result"))
+adaptive_coalescing_off = bool_it(ctl.get_alias("adaptive_coalescing_off"))
 
 sctp_default_msg_size = "16K"
 
@@ -63,6 +64,20 @@ m2_testiface = m2.get_interface("testiface")
 
 m1_testiface.set_mtu(mtu)
 m2_testiface.set_mtu(mtu)
+
+if adaptive_coalescing_off:
+    coalesce_status = ctl.get_module('Custom')
+
+    for d in [ m1_testiface, m2_testiface ]:
+        # disable any interrupt coalescing settings
+        cdata = d.save_coalesce()
+        cdata['use_adaptive_tx_coalesce'] = 0
+        cdata['use_adaptive_rx_coalesce'] = 0
+        if not d.set_coalesce(cdata):
+            coalesce_status.set_options({'fail': True,
+                                         'msg': "Failed to set coalesce options"\
+                                                " on device %s" % d.get_devname()})
+            d.get_host().run(coalesce_status)
 
 if nperf_cpupin:
     m1.run("service irqbalance stop")
@@ -204,6 +219,14 @@ if nperf_msg_size is not None:
     netperf_cli_udp6.update_options({"msg_size" : nperf_msg_size})
     netperf_cli_sctp6.update_options({"msg_size" : nperf_msg_size})
 
+# if we will run SCTP test make sure the SCTP will go out through the test
+# interfaces only
+if nperf_protocols.find("sctp") > -1:
+    m1.run("iptables -I OUTPUT ! -o %s -p sctp -j DROP" %
+            m1_testiface.get_devname())
+    m2.run("iptables -I OUTPUT ! -o %s -p sctp -j DROP" %
+            m2_testiface.get_devname())
+
 ctl.wait(15)
 
 for setting in offload_settings:
@@ -288,6 +311,9 @@ for setting in offload_settings:
                                                   'redhat_release'])
             for offload in setting:
                 result_sctp.set_parameter(offload[0], offload[1])
+
+            if nperf_msg_size is not None:
+                result_sctp.set_parameter("nperf_msg_size", nperf_msg_size)
 
             result_sctp.add_tag(product_name)
             if nperf_mode == "multi":
@@ -375,6 +401,9 @@ for setting in offload_settings:
             for offload in setting:
                 result_sctp.set_parameter(offload[0], offload[1])
 
+            if nperf_msg_size is not None:
+                result_sctp.set_parameter("nperf_msg_size", nperf_msg_size)
+
             result_sctp.add_tag(product_name)
             if nperf_mode == "multi":
                 result_sctp.add_tag("multithreaded")
@@ -402,3 +431,14 @@ m2.run("ethtool -K %s %s" % (m2_testiface.get_devname(), dev_features))
 if nperf_cpupin:
     m1.run("service irqbalance start")
     m2.run("service irqbalance start")
+
+if nperf_protocols.find("sctp") > -1:
+    m1.run("iptables -D OUTPUT ! -o %s -p sctp -j DROP" %
+            m1_testiface.get_devname())
+    m2.run("iptables -D OUTPUT ! -o %s -p sctp -j DROP" %
+            m2_testiface.get_devname())
+
+if adaptive_coalescing_off:
+    for d in [ m1_testiface, m2_testiface ]:
+        # restore any interrupt coalescing settings
+        d.restore_coalesce()
