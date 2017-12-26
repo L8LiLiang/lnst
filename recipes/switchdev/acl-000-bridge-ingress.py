@@ -75,7 +75,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     m2_if1_10 = m2.create_vlan(m2_if1, 10, ip=test_ip(2, 2))
     m2_if1_20 = m2.create_vlan(m2_if1, 20, ip=test_ip(3, 2))
 
-    br_options = {"vlan_filtering": 1}
+    br_options = {"vlan_filtering": 1,"multicast_querier": 1}
     sw_br = sw.create_bridge(slaves=[sw_if1, sw_if2], options=br_options)
 
     sw_if1.add_br_vlan(10)
@@ -92,7 +92,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     # add qdisc
     sw.run("tc qdisc replace dev %s handle 0: root prio" % sw_if1.get_devname())
     sw.run("tc qdisc add dev %s handle ffff: ingress" % sw_if1.get_devname())
-
+    
     # dst_ip
     tl.ping_simple(m1_if1, m2_if1, count=10)
     sw.run("tc filter add dev %s parent ffff: protocol ip pref 10 flower skip_sw dst_ip %s action drop" % (sw_if1.get_devname(),test_ip_nomask(1,2)[0]))
@@ -128,7 +128,7 @@ def do_task(ctl, hosts, ifaces, aliases):
         assert_proc.intr()
     sw.run("tc filter del dev %s parent ffff: protocol ip pref 10 flower skip_sw dst_mac %s action drop" % (sw_if1.get_devname(),m2_if1.get_hwaddr()))
     sw.run("tc filter del dev %s parent ffff: protocol ipv6 pref 11 flower skip_sw dst_mac %s action drop" % (sw_if1.get_devname(),m2_if1.get_hwaddr()))
-   
+
     # src_mac
     tl.ping_simple(m1_if1, m2_if1, count=10)
     sw.run("tc filter add dev %s parent ffff: protocol ip pref 10 flower skip_sw src_mac %s action drop" % (sw_if1.get_devname(),m1_if1.get_hwaddr()))
@@ -140,7 +140,7 @@ def do_task(ctl, hosts, ifaces, aliases):
         assert_proc.intr()
     sw.run("tc filter del dev %s parent ffff: protocol ip pref 10 flower skip_sw src_mac %s action drop" % (sw_if1.get_devname(),m1_if1.get_hwaddr()))
     sw.run("tc filter del dev %s parent ffff: protocol ipv6 pref 11 flower skip_sw src_mac %s action drop" % (sw_if1.get_devname(),m1_if1.get_hwaddr()))
-   
+       
     # tcp dst_port
     m1.run("nping --tcp -p 80 -g 50000 %s" % test_ip_nomask(1,2)[0])
     sw.run("tc filter add dev %s parent ffff: protocol ip pref 10 flower skip_sw ip_proto tcp dst_port 80 action drop" % sw_if1.get_devname())
@@ -184,28 +184,28 @@ def do_task(ctl, hosts, ifaces, aliases):
     # vlan_id
     tl.ping_simple(m1_if1_10, m2_if1_10, count=10)
     tl.ping_simple(m1_if1_20, m2_if1_20, count=10)
-    sw.run("tc filter add dev %s parent ffff: protocol 802.1q flower vlan_id 20 skip_sw action drop" % sw_if1.get_devname())
-    assert_procs = run_packet_assert(10, sw_if2, m1_if1_10, m2_if1_10,
-                                     aliases["ipv"])
+    sw.run("tc filter add dev %s parent ffff: protocol 802.1q pref 10 flower vlan_id 20 skip_sw action drop" % sw_if1.get_devname())
+    #assert_procs = run_packet_assert(10, sw_if2, m1_if1_10, m2_if1_10,
+    #                                 aliases["ipv"])
     tl.ping_simple(m1_if1_10, m2_if1_10, count=10)
-    for assert_proc in assert_procs:
-        assert_proc.intr()
-    assert_procs = run_packet_assert(0, sw_if2, m1_if1_20, m2_if1_20,
-                                     aliases["ipv"])
+    #for assert_proc in assert_procs:
+    #    assert_proc.intr()
+    #assert_procs = run_packet_assert(0, sw_if2, m1_if1_20, m2_if1_20,
+    #                                 aliases["ipv"])
     tl.ping_simple(m1_if1_20, m2_if1_20, count=10, fail_expected=True)
-    for assert_proc in assert_procs:
-        assert_proc.intr()
-    sw.run("tc filter del dev %s parent ffff: protocol 802.1q flower vlan_id 20 skip_sw action drop" % sw_if1.get_devname())
+    #for assert_proc in assert_procs:
+    #    assert_proc.intr()
+    sw.run("tc filter del dev %s parent ffff: protocol 802.1q pref 10 flower vlan_id 20 skip_sw action drop" % sw_if1.get_devname())
 
     # vlan_prio
-    sw.run("tc filter add dev %s parent ffff: protocol 802.1q flower vlan_prio 3 skip_sw action drop" % sw_if1.get_devname())
+    sw.run("tc filter add dev %s parent ffff: protocol 802.1q pref 10 flower vlan_prio 3 skip_sw action drop" % sw_if1.get_devname())
     assert_procs = run_packet_assert(0, sw_if2, m1_if1_10, m2_if1_10,
                                      aliases["ipv"], "udp", 0, 9)
     tl.pktgen(m1_if1_10, m2_if1_10, m1_if1_10.get_mtu(), vlan_id=10, vlan_p=3, count=100)
     for assert_proc in assert_procs:
         assert_proc.intr()
-    sw.run("tc filter del dev %s parent ffff: protocol 802.1q flower vlan_prio 3 skip_sw  action drop" % sw_if1.get_devname())
-
+    sw.run("tc filter del dev %s parent ffff: protocol 802.1q pref 10 flower vlan_prio 3 skip_sw  action drop" % sw_if1.get_devname())
+    
 do_task(ctl, [ctl.get_host("machine1"),
               ctl.get_host("machine2"),
               ctl.get_host("switch")],
