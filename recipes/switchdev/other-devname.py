@@ -53,8 +53,8 @@ from TestLib import TestLib
 from time import sleep
 import re
 import random
-import MySQLdb
 import operator
+import os,sys
 
 class DBManager:
 
@@ -64,11 +64,30 @@ class DBManager:
         self.passwd = passwd
         self.database = database
         self.table = table
-        self.conn = MySQLdb.connect(
+        if (os.system("yum install -y MySQL-python > /dev/null 2>&1") == 0):
+            import MySQLdb
+            self.conn = MySQLdb.connect(
                 host = host,
                 user = user,
                 passwd = passwd,
-                db = database)
+                db = database,
+            )
+        elif (os.system("yum install -y python2-PyMySQL > /dev/null 2>&1") == 0):
+            import pymysql
+            self.conn = pymysql.connect(
+                host = host,
+                user = user,
+                passwd = passwd,
+                db = database,
+            )
+        else:
+            import MySQLdb
+            self.conn = MySQLdb.connect(
+                    host = host,
+                    user = user,
+                    passwd = passwd,
+                    db = database,
+            )
 
     def get_devname(self,distro,driver,machine,mac):
         cur=self.conn.cursor()
