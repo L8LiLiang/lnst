@@ -31,6 +31,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     ecmp_m_ifaces = [m2_if1, m2_if2]
 
     m2.config("/proc/sys/net/ipv4/ip_forward", "1")
+    m2.config("/proc/sys/net/ipv6/conf/all/forwarding", "1")
 
     ecmp_common.create_topology(m1_if1, sw_if1, ecmp_sw_ifaces, ecmp_m_ifaces,
                                 m2_if3, m3_if1)

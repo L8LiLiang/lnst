@@ -83,7 +83,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     sw_if1.add_br_vlan(20)
     sw_if2.add_br_vlan(20)
 
-    sleep(30)
+    sleep(40)
     
     tl.ping_simple(m1_if1, m2_if1, count=10)
     tl.ping_simple(m1_if1_10, m2_if1_10, count=10)

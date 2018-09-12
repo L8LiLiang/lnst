@@ -52,7 +52,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
     # add it back
     mt.add_rif(sw_if3)
-    sleep(30)
+    sleep(90)
     mt.mroute_test(sg)
 
     # remove another RIF
