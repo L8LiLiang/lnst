@@ -4,6 +4,7 @@ import paramiko
 import logging
 from tempfile import NamedTemporaryFile
 from lnst.Common.Utils import bool_it, std_deviation, dict_to_dot, Noop
+from lnst.Common.Logs import log_exc_traceback
 from lnst.Controller.Task import ctl
 from lnst.Controller.PerfRepoUtils import perfrepo_baseline_to_dict
 from lnst.RecipeCommon.ModuleWrap import ping
@@ -102,6 +103,8 @@ if tmp:
 else:
     dpdk_version = "unknown"
 
+ovs_rpm_version = h2.run("rpm -qf `which ovs-vswitchd` || true").get_result()["res_data"]["stdout"]
+
 # ------
 # TESTS
 # ------
@@ -109,7 +112,9 @@ else:
 official_result = bool_it(ctl.get_alias("official_result"))
 pr_user_comment = ctl.get_alias("perfrepo_comment")
 host1_dpdk_cores = ctl.get_alias("host1_dpdk_cores")
+host2_dpdk_lcores = ctl.get_alias("host2_dpdk_lcores")
 host2_dpdk_cores = ctl.get_alias("host2_dpdk_cores")
+guest_testpmd_cores = ctl.get_alias("guest_testpmd_cores")
 guest_dpdk_cores = ctl.get_alias("guest_dpdk_cores")
 nr_hugepages = int(ctl.get_alias("nr_hugepages"))
 socket_mem = int(ctl.get_alias("socket_mem"))
@@ -119,6 +124,7 @@ guest_hostname = ctl.get_alias("guest_hostname")
 guest_username = ctl.get_alias("guest_username")
 guest_password = ctl.get_alias("guest_password")
 guest_cpus = ctl.get_alias("guest_cpus")
+guest_emulatorpin = ctl.get_alias("guest_emulatorpin")
 trex_dir = ctl.get_alias("trex_dir")
 pkt_size = int(ctl.get_alias("pkt_size"))
 test_duration = int(ctl.get_alias("test_duration"))
@@ -127,48 +133,22 @@ max_dev = ctl.get_alias("max_dev")
 
 pr_comment = generate_perfrepo_comment([h1, h2], pr_user_comment)
 pr_comment += "\n<BR>DPDK version: {}".format(dpdk_version)
+pr_comment += "\n<BR/>OvS rpm version: {}".format(ovs_rpm_version)
 
 h1_nic1 = h1.get_interface("if1")
 h1_nic2 = h1.get_interface("if2")
 h2_nic1 = h2.get_interface("if1")
 h2_nic2 = h2.get_interface("if2")
 
-
-#============================================
-# WARMP UP - teach switch about mac addresses
-#============================================
+#=================================================
+# Keep ip address configuration for hash stability
+#=================================================
 
 h1_nic1.set_addresses(["192.168.1.1/24"])
 h1_nic2.set_addresses(["192.168.1.3/24"])
 
 h2_nic1.set_addresses(["192.168.1.2/24"])
 h2_nic2.set_addresses(["192.168.1.4/24"])
-
-ctl.wait(5)
-
-ping_opts = {"count": 100, "interval": 0.1, "limit_rate": 20}
-
-pings = []
-pings.append(ping((h1, h1_nic1, 0, {"scope": 0}),
-                  (h2, h2_nic1, 0, {"scope": 0}),
-                  options=ping_opts, bg=True))
-pings.append(ping((h1, h1_nic2, 0, {"scope": 0}),
-                  (h2, h2_nic2, 0, {"scope": 0}),
-                  options=ping_opts, bg=True))
-
-pings.append(ping((h2, h2_nic1, 0, {"scope": 0}),
-                  (h1, h1_nic1, 0, {"scope": 0}),
-                  options=ping_opts, bg=True))
-pings.append(ping((h2, h2_nic2, 0, {"scope": 0}),
-                  (h1, h1_nic2, 0, {"scope": 0}),
-                  options=ping_opts, bg=True))
-
-for i in pings:
-    i.wait()
-
-#============================================
-# WARMP UP END
-#============================================
 
 
 h1.run("service irqbalance stop")
@@ -191,6 +171,7 @@ h2.config("/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages", nr_hugepages
 h2.enable_service("openvswitch")
 h2.run("ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-init=true")
 h2.run("ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-socket-mem=%d" % socket_mem)
+h2.run("ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-lcore-mask=%s" % host2_dpdk_lcores)
 h2.run("ovs-vsctl --no-wait set Open_vSwitch . other_config:pmd-cpu-mask=%s" % host2_dpdk_cores)
 h2.restart_service("openvswitch")
 
@@ -273,9 +254,15 @@ cpu = guest_xml.find("cpu")
 numa = ET.SubElement(cpu, 'numa')
 ET.SubElement(numa, 'cell', id='0', cpus='0', memory=guest_mem_amount, unit='KiB', memAccess='shared')
 
+memoryBacking = ET.SubElement(guest_xml, "memoryBacking")
+hugepages = ET.SubElement(memoryBacking, "hugepages")
+ET.SubElement(hugepages, "page", size="2", unit="M", nodeset="0")
+
 cputune = ET.SubElement(guest_xml, "cputune")
 for i, cpu_id in enumerate(guest_cpus.split(',')):
     ET.SubElement(cputune, "vcpupin", vcpu=str(i), cpuset=str(cpu_id))
+
+ET.SubElement(cputune, "emulatorpin", cpuset=guest_emulatorpin)
 
 updated_guest_xml = NamedTemporaryFile("w+b", delete=False)
 updated_guest_xml.write(ET.tostring(guest_xml))
@@ -288,7 +275,19 @@ h2.run("virsh start %s" % guest_virtname)
 #============================================
 # Host2 wait for guest start
 #============================================
-ctl.wait(60)
+
+guest = paramiko.SSHClient()
+guest.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+tries = 60
+while tries:
+    logging.info("Connecting to guest, %d tries remaining" % tries)
+    tries -= 1
+    try:
+        guest.connect(guest_hostname, username=guest_username, password=guest_password)
+        break
+    except paramiko.ssh_exception.NoValidConnectionsError as e:
+        logging.debug(str(e))
+        ctl.wait(5)
 
 #============================================
 # Host2 add openvswitch flows between DPDK NICs and Guest NICs
@@ -303,10 +302,6 @@ h2.run("ovs-ofctl add-flow br0 in_port=22,action=12")
 #============================================
 # Guest configure DPDK for vhostuser nics
 #============================================
-
-guest = paramiko.SSHClient()
-guest.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-guest.connect(guest_hostname, username=guest_username, password=guest_password)
 
 run_ssh_command_on_guest("service irqbalance stop", guest, h2, guest_virtname)
 run_ssh_command_on_guest("MASK=1; for i in `ls -d /proc/irq/[0-9]*` ; do echo $MASK > ${i}/smp_affinity ; done", guest, h2, guest_virtname)
@@ -337,9 +332,11 @@ testpmd_shell = guest.get_transport().open_session()
 testpmd_cmd = ("testpmd -c {coremask} "
                       "-w {pci1} -w {pci2} "
                       "-n 4 --socket-mem 1024,0 -- "
+                      "--coremask {pmd_coremask} "
                       "-i --eth-peer=0,{hw1} --eth-peer=1,{hw2} "
                       "--forward-mode=mac").format(
-                          coremask=guest_dpdk_cores,
+                          coremask=guest_testpmd_cores,
+                          pmd_coremask=guest_dpdk_cores,
                           pci1=g_nic1_pci, pci2=g_nic2_pci,
                           hw1=h1_nic1.get_hwaddr(), hw2=h1_nic2.get_hwaddr())
 

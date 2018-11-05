@@ -4,9 +4,11 @@
         <alias name="driver" value=""/>
         <alias name="official_result" value="no" />
         <alias name="host1_dpdk_cores" value="2,3,4" />
+        <alias name="host2_dpdk_lcores" value="0x400" />
         <alias name="host2_dpdk_cores" value="0x1E" />
+        <alias name="guest_testpmd_cores" value="0x7" />
         <alias name="guest_dpdk_cores" value="0x6" />
-        <alias name="nr_hugepages" value="2048" />
+        <alias name="nr_hugepages" value="13000" />
         <alias name="socket_mem" value="2048" />
         <alias name="trex_dir" value="" />
         <alias name="guest_mem_amount" value="16777216" />
@@ -14,7 +16,8 @@
         <alias name="guest_hostname" value="" />
         <alias name="guest_username" value="" />
         <alias name="guest_password" value="" />
-        <alias name="guest_cpus" value="" />
+        <alias name="guest_cpus" value="5,6,7,8" />
+        <alias name="guest_emulatorpin" value="9"/>
         <alias name="pkt_size" value="64" />
         <alias name="test_duration" value="60" />
         <alias name="test_runs" value="5" />
