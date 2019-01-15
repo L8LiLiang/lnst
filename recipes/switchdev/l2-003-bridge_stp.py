@@ -51,7 +51,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     tl.ping_simple(m1_if1, m2_if1, fail_expected=True)
     tl.check_fdb(sw_if1, m1_if1.get_hwaddr(), 1, True, True)
 
-    sleep(30)
+    sleep(40)
 
     tl.check_fdb(sw_if1, m1_if1.get_hwaddr(), 1, True, True, False)
 
@@ -61,7 +61,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     tl.ping_simple(m1_if1, m2_if1)
     tl.check_fdb(sw_if1, m1_if1.get_hwaddr(), 1, True, True)
 
-    sleep(30)
+    sleep(40)
 
     tl.check_fdb(sw_if1, m1_if1.get_hwaddr(), 1, True, True, False)
 

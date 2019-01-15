@@ -49,12 +49,13 @@ def do_task(ctl, hosts, ifaces, aliases):
     for iface in ecmp_sw_ifaces:
         sw.config("/proc/sys/net/ipv4/conf/%s/ignore_routes_with_linkdown" %
                   iface.get_devname(), "1")
-
+    
     curr_ecmp_m_ifaces = copy.copy(ecmp_m_ifaces)
     curr_ecmp_sw_ifaces = copy.copy(ecmp_sw_ifaces)
     while len(curr_ecmp_m_ifaces) > 1:
         sw_iface, m_iface = curr_ecmp_sw_ifaces.pop(), curr_ecmp_m_ifaces.pop()
         m_iface.set_link_down()
+        sleep(30)
 
         msg = "Running with %d failed nexthops" % (len(ecmp_sw_ifaces) -
                                                    len(curr_ecmp_sw_ifaces))
@@ -75,6 +76,7 @@ def do_task(ctl, hosts, ifaces, aliases):
     while len(curr_ecmp_m_ifaces) > 1:
         sw_iface, m_iface = curr_ecmp_sw_ifaces.pop(), curr_ecmp_m_ifaces.pop()
         m_iface.set_link_down()
+        sleep(30)
 
         msg = "Running with %d failed nexthops" % (len(ecmp_sw_ifaces) -
                                                    len(curr_ecmp_sw_ifaces))

@@ -50,7 +50,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
                 sleep(5)
                 d.set_addresses(["1.2.3.4/32"])
-                sleep(15)
+                sleep(25)
                 ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                           ipv6=True)
                 ping_test(tl, m1, sw, ipv4(test_ip(2, 33, [])), m1_if1, g)

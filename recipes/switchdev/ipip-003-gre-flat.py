@@ -43,7 +43,7 @@ def do_task(ctl, hosts, ifaces, aliases):
         sw_if1.reset()
         sw_if2.reset()
         add_forward_route(sw, vrf1, "1.2.3.5")
-        sleep(20)
+        sleep(30)
 
         ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                   ipv6=True)
@@ -70,7 +70,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
             sleep(5)
             d.set_addresses(["1.2.3.4/32"])
-            sleep(15)
+            sleep(25)
             ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                       ipv6=True)
             ping_test(tl, m1, sw, ipv4(test_ip(2, 33, [])), m1_if1, g)
@@ -86,7 +86,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
             with encap_route(sw, vrf_None, 2, g, ip=ipv4), \
                  encap_route(sw, vrf_None, 2, g, ip=ipv6):
-                sleep(15)
+                sleep(25)
                 ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                           ipv6=True)
                 ping_test(tl, m1, sw, ipv4(test_ip(2, 33, [])), m1_if1, g)
@@ -102,7 +102,7 @@ def do_task(ctl, hosts, ifaces, aliases):
                  remote_ip="1.2.3.5") as g, \
              encap_route(sw, vrf_None, 2, g, ip=ipv4), \
              encap_route(sw, vrf_None, 2, g, ip=ipv6):
-                sleep(15)
+                sleep(25)
                 ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                           ipv6=True)
                 ping_test(tl, m1, sw, ipv4(test_ip(2, 33, [])), m1_if1, g)
@@ -116,7 +116,7 @@ def do_task(ctl, hosts, ifaces, aliases):
              encap_route(sw, vrf_None, 2, g, ip=ipv4), \
              encap_route(sw, vrf_None, 2, g, ip=ipv6):
 
-            sleep(15)
+            sleep(25)
             ping_test(tl, m1, sw, ipv6(test_ip(2, 33, [])), m1_if1, g,
                       ipv6=True)
             ping_test(tl, m1, sw, ipv4(test_ip(2, 33, [])), m1_if1, g)

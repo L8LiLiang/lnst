@@ -67,16 +67,16 @@ class DBManager:
         if sys.version_info.major == 3:
             os.system("yum install -y python3-PyMySQL > /dev/null 2>&1")
             import pymysql
-            conn=pymysql.connect(
+            self.conn=pymysql.connect(
                 host=host,
                 user=user,
                 passwd=passwd,
                 db =database,
                 )
         else:
-            os.system("yum install -y MySQL-python > /dev/null 2>&1")
-            import MySQLdb
-            conn=MySQLdb.connect(
+            os.system("yum install -y python2-PyMySQL > /dev/null 2>&1")
+            import pymysql
+            self.conn=pymysql.connect(
                 host=host,
                 user=user,
                 passwd=passwd,
@@ -120,7 +120,7 @@ def do_task(ctl, hosts, ifaces, aliases):
 
     dbm = DBManager()
 
-    current_distro = sw.run("cat /etc/redhat-release | awk  '{print $7}'").out().strip()
+    current_distro = sw.run("cat /etc/redhat-release | grep -o [0-9].[0-9]").out().strip()
     pre_distro = str(float(current_distro) - 0.1)
     hostname = sw.run("hostname|head -n 1").out().strip()
     sw_if1_devname_old = dbm.get_devname(pre_distro,sw_if1.get_driver(),hostname,sw_if1_mac)
