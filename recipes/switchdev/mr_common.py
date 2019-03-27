@@ -126,6 +126,11 @@ class MrouteTest:
         tx_stats_after = source_port.link_stats()["tx_packets"]
         rx_stats_after = [port.link_stats()["rx_mcast"]
                           for port in self.mach_ports]
+        # workaround for RHEL8, you need call link_stats() 2 times to get the newest rx_mcast value
+        sleep(1)
+        tx_stats_after = source_port.link_stats()["tx_packets"]
+        rx_stats_after = [port.link_stats()["rx_mcast"]
+                          for port in self.mach_ports]
         source_port.disable_multicast()
 
         tx_stats = tx_stats_after - tx_stats_before
