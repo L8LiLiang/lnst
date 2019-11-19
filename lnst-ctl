@@ -1,4 +1,4 @@
-#! /usr/bin/env python2
+#! /usr/bin/env python3
 """
 Net test controller
 
@@ -34,41 +34,42 @@ def usage(retval=0):
     """
     Print usage of this app
     """
-    print "Usage: %s [OPTIONS...] ACTION [RECIPES...]" % sys.argv[0]
-    print ""
-    print "ACTION = [ run | config_only | deconfigure | match_setup | " \
-                     "list_pools]"
-    print ""
-    print "OPTIONS"
-    print "  -A, --override-alias name=value define top-level alias that " \
-              "will override any other definitions in the recipe"
-    print "  -a, --define-alias name=value   define top-level alias"
-    print "  -c, --config=FILE               load additional config file"
-    print "  -C, --config-override=FILE      reset config defaults and load " \
-              "the following config file"
-    print "  -d, --debug                     emit debugging messages"
-    print "      --dump-config               dumps the join of all loaded " \
-              "configuration files on stdout and exits"
-    print "  -v, --verbose                   verbose version of list_pools " \
-              "command"
-    print "  -h, --help                      print this message"
-    print "  -m, --no-colours                disable coloured terminal output"
-    print "  -o, --disable-pool-checks       don't check the availability of " \
-              "machines in the pool"
-    print "  -p, --packet-capture            capture and log all ongoing " \
-              "network communication during the test"
-    print "      --pools=NAME[,...]          restricts which pools to use "\
-              "for matching, value can be a comma separated list of values or"
-    print "      --pools=PATH                a single path to a pool directory"
-    print "  -r, --reduce-sync               reduces resource synchronization "\
-              "for python tasks, see documentation"
-    print "  -s, --xslt-url=URL              URL to a XSLT document that will "\
+    print("Usage: %s [OPTIONS...] ACTION [RECIPES...]" % sys.argv[0])
+    print("")
+    print("ACTION = [ run | config_only | deconfigure | match_setup | " \
+                     "list_pools]")
+    print("")
+    print("OPTIONS")
+    print("  -A, --override-alias name=value define top-level alias that " \
+              "will override any other definitions in the recipe")
+    print("  -a, --define-alias name=value   define top-level alias")
+    print("  -b, --breakpoints               enable breakpoint feature")
+    print("  -c, --config=FILE               load additional config file")
+    print("  -C, --config-override=FILE      reset config defaults and load " \
+              "the following config file")
+    print("  -d, --debug                     emit debugging messages")
+    print("      --dump-config               dumps the join of all loaded " \
+              "configuration files on stdout and exits")
+    print("  -v, --verbose                   verbose version of list_pools " \
+              "command")
+    print("  -h, --help                      print this message")
+    print("  -m, --no-colours                disable coloured terminal output")
+    print("  -o, --disable-pool-checks       don't check the availability of " \
+              "machines in the pool")
+    print("  -p, --packet-capture            capture and log all ongoing " \
+              "network communication during the test")
+    print("      --pools=NAME[,...]          restricts which pools to use "\
+              "for matching, value can be a comma separated list of values or")
+    print("      --pools=PATH                a single path to a pool directory")
+    print("  -r, --reduce-sync               reduces resource synchronization "\
+              "for python tasks, see documentation")
+    print("  -s, --xslt-url=URL              URL to a XSLT document that will "\
               "be used when transforming the xml result file, only useful "\
-              "when -t is used as well"
-    print "  -t, --html=FILE                 generate a formatted result html"
-    print "  -u, --multi-match               run each recipe with every "\
-              "pool match possible"
-    print "  -x, --result=FILE               file to write xml_result"
+              "when -t is used as well")
+    print("  -t, --html=FILE                 generate a formatted result html")
+    print("  -u, --multi-match               run each recipe with every "\
+              "pool match possible")
+    print("  -x, --result=FILE               file to write xml_result")
     sys.exit(retval)
 
 def list_pools(restrict_pools, verbose):
@@ -90,12 +91,12 @@ def list_pools(restrict_pools, verbose):
     out = ""
     # iterate over all pools
     sp_pools = sp.get_pools()
-    for pool_name, pool_content in sp_pools.iteritems():
+    for pool_name, pool_content in sp_pools.items():
         out += "Pool: %s (%s)\n" % (pool_name, pools[pool_name])
         # verbose output
         if verbose:
         # iterate over all slave machine cfgs
-            for filename, pool in pool_content.iteritems():
+            for filename, pool in pool_content.items():
                 # print in human-readable format
                 out += 3*" " + filename + ".xml\n"
                 out += 5*" " + "params:\n"
@@ -113,9 +114,9 @@ def list_pools(restrict_pools, verbose):
                 out += "\n"
     # print wihout newlines on the end of string
     if verbose:
-        print out[:-2]
+        print(out[:-2])
     else:
-        print out[:-1]
+        print(out[:-1])
 
 
 def store_alias(alias_def, aliases_dict):
@@ -135,14 +136,12 @@ def store_alias(alias_def, aliases_dict):
 def exec_action(action, nettestctl):
     if action == "run":
         return nettestctl.run_recipe()
-    elif action == "config_only":
-        return nettestctl.config_only_recipe()
     elif action == "match_setup":
         return nettestctl.match_setup()
 
 def get_recipe_result(action, file_path, log_ctl, res_serializer,
                       pool_checks, packet_capture,
-                      defined_aliases, overriden_aliases,
+                      defined_aliases, breakpoints,
                       reduce_sync, multi_match, pools):
     retval = RETVAL_PASS
 
@@ -161,9 +160,10 @@ def get_recipe_result(action, file_path, log_ctl, res_serializer,
                                        pool_checks=pool_checks,
                                        packet_capture=packet_capture,
                                        defined_aliases=defined_aliases,
-                                       overriden_aliases=overriden_aliases,
                                        reduce_sync=reduce_sync,
-                                       restrict_pools=pools)
+                                       restrict_pools=pools,
+                                       multi_match=multi_match,
+                                       breakpoints=breakpoints)
     except XmlProcessingError as err:
         log_exc_traceback()
         logging.error(err)
@@ -177,9 +177,13 @@ def get_recipe_result(action, file_path, log_ctl, res_serializer,
         res = {}
         if matches == 1:
             try:
-                nettestctl.provision_machines()
-                nettestctl.print_match_description()
+                # init TaskAPI.Ctl
+                nettestctl.init_taskapi()
                 res = exec_action(action, nettestctl)
+            except NoMatchError as err:
+                no_match = True
+                log_ctl.unset_recipe()
+                logging.warning("Match %d not possible." % matches)
             except Exception as err:
                 no_match = True
                 log_exc_traceback()
@@ -189,12 +193,11 @@ def get_recipe_result(action, file_path, log_ctl, res_serializer,
                 retval = RETVAL_ERR
         elif matches > 1:
             try:
-                nettestctl.provision_machines()
+                nettestctl.init_taskapi()
                 log_ctl.set_recipe(file_path, prepend=True, expand="match_%d" % matches)
                 log_dir = log_ctl.get_recipe_log_path()
                 recipe_head_log_entry(file_path, log_dir, matches)
                 res_serializer.add_recipe(file_path, matches)
-                nettestctl.print_match_description()
                 res = exec_action(action, nettestctl)
             except NoMatchError as err:
                 no_match = True
@@ -241,8 +244,9 @@ def main():
     try:
         opts, args = getopt.getopt(
             sys.argv[1:],
-            "A:a:c:C:dhmoprs:t:ux:v",
+            "A:a:bc:C:dhmoprs:t:ux:v",
             [
+             "breakpoints",
              "override_alias=",
              "define_alias=",
              "config=",
@@ -263,7 +267,7 @@ def main():
             ]
         )
     except getopt.GetoptError as err:
-        print str(err)
+        print(str(err))
         usage(RETVAL_ERR)
 
     lnst_config.controller_init()
@@ -287,6 +291,7 @@ def main():
         with open(usr_cfg, 'w') as f:
             f.write(lnst_config.dump_config())
 
+    breakpoints = False
     debug = 0
     result_path = None
     html_result_path = None
@@ -306,18 +311,20 @@ def main():
             debug += 1
         elif opt in ("-h", "--help"):
             usage(RETVAL_PASS)
+        elif opt in ("-b", "--breakpoints"):
+            breakpoints = True
         elif opt in ("-c", "--config"):
             if not os.path.isfile(arg):
-                print "File '%s' doesn't exist!" % arg
+                print("File '%s' doesn't exist!" % arg)
                 usage(RETVAL_ERR)
             else:
                 lnst_config.load_config(arg)
         elif opt in ("-C", "--config-override"):
             if not os.path.isfile(arg):
-                print "File '%s' doesn't exist!" % arg
+                print("File '%s' doesn't exist!" % arg)
                 usage(RETVAL_ERR)
             else:
-                print >> sys.stderr, "Reloading config defaults!"
+                print("Reloading config defaults!", file=sys.stderr)
                 lnst_config.controller_init()
                 lnst_config.load_config(arg)
         elif opt in ("-x", "--result"):
@@ -351,7 +358,7 @@ def main():
         lnst_config.set_option("environment", "xslt_url", xslt_url)
 
     if dump_config:
-        print lnst_config.dump_config()
+        print(lnst_config.dump_config())
         return RETVAL_PASS
 
     if coloured_output:
@@ -371,13 +378,9 @@ def main():
 
     action = args[0]
     recipes = args[1:]
-    if not action in ['run', 'config_only', 'deconfigure', 'match_setup',
-                      'list_pools']:
+    if not action in ['run', 'match_setup', 'list_pools']:
         logging.error("Action '%s' not recognised" % action)
         usage(RETVAL_ERR)
-    if action == 'deconfigure':
-        NetTestController.remove_saved_machine_config()
-        return 0
     elif action == 'list_pools':
         log_ctl.unset_formatter()
         logging.disable(logging.INFO)
@@ -399,7 +402,7 @@ def main():
             all_files.sort()
             for f in all_files:
                 recipe_file = os.path.join(recipe_path, f)
-                if re.match(r'^.*\.xml$', recipe_file):
+                if re.match(r'^.*\.py$', recipe_file):
                     recipe_files.append(recipe_file)
         else:
             recipe_files.append(recipe_path)
@@ -409,7 +412,7 @@ def main():
     for recipe_file in recipe_files:
         rv = get_recipe_result(action, recipe_file, log_ctl, res_serializer,
                                pool_checks, packet_capture,
-                               defined_aliases, overriden_aliases,
+                               defined_aliases, breakpoints,
                                reduce_sync, multi_match, pools)
         if rv > retval:
             retval = rv

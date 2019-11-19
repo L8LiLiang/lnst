@@ -6,16 +6,17 @@ Licensed under the GNU General Public License, version 2 as
 published by the Free Software Foundation; see COPYING for details.
 """
 
-__autor__ = """
+__author__ = """
 jzupka@redhat.com (Jiri Zupka)
 """
 import pty, os, termios, time, signal, re, select
 import logging, atexit
 from lnst.Common.Utils import wait_for
 from lnst.Common.ProcessManager import ProcessManager
+from lnst.Common.LnstError import LnstError
 
 class ShellProcess:
-    class ProcessError(Exception):
+    class ProcessError(LnstError):
         def __init__(self, patterns, output):
             Exception.__init__(self, patterns, output)
             self.patterns = patterns
@@ -229,7 +230,7 @@ class ShellProcess:
             except:
                 return data
             if r and (r[0][1] & select.POLLIN):
-                new_data = os.read(fd, 1024)
+                new_data = os.read(fd, 1024).decode()
                 if not new_data:
                     return data
                 data += new_data

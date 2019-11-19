@@ -19,10 +19,15 @@ import datetime
 import socket
 import ctypes
 import multiprocessing
+<<<<<<< HEAD
 import re
 import struct
+=======
+import imp
+import types
+>>>>>>> jpirko/master
 from time import sleep, time
-from xmlrpclib import Binary
+from inspect import isclass
 from tempfile import NamedTemporaryFile
 from lnst.Common.Logs import log_exc_traceback
 from lnst.Common.PacketCapture import PacketCapture
@@ -36,26 +41,60 @@ from lnst.Common.Utils import check_process_running
 from lnst.Common.Utils import is_installed
 from lnst.Common.ConnectionHandler import send_data
 from lnst.Common.ConnectionHandler import ConnectionHandler
-from lnst.Common.Config import lnst_config
 from lnst.Common.Config import DefaultRPCPort
+<<<<<<< HEAD
 from lnst.Common.Consts import MROUTE
+=======
+from lnst.Common.DeviceRef import DeviceRef
+from lnst.Common.LnstError import LnstError
+from lnst.Common.DeviceError import DeviceDeleted, DeviceDisabled
+from lnst.Common.DeviceError import DeviceConfigValueError
+from lnst.Common.Parameters import Parameters, DeviceParam
+from lnst.Common.IpAddress import ipaddress
+from lnst.Common.Version import lnst_version
+from lnst.Slave.Job import Job, JobContext
+>>>>>>> jpirko/master
 from lnst.Slave.InterfaceManager import InterfaceManager
 from lnst.Slave.BridgeTool import BridgeTool
 from lnst.Slave.SlaveSecSocket import SlaveSecSocket, SecSocketException
+
+# maximum time the server should block on select -- forces frequent Netlink
+# checks
+MAX_SERVER_HANG = 5
+
+Devices = types.ModuleType("Devices")
+Devices.__path__ = ["lnst.Devices"]
+
+sys.modules["lnst.Devices"] = Devices
+
+Tests = types.ModuleType("Tests")
+Tests.__path__ = ["lnst.Tests"]
+
+sys.modules["lnst.Tests"] = Tests
+
+RecipeCommon = types.ModuleType("RecipeCommon")
+RecipeCommon.__path__ = ["lnst.RecipeCommon"]
+
+sys.modules["lnst.RecipeCommon"] = RecipeCommon
+
+class SystemCallException(Exception):
+    """Exception used to handle SIGINT waiting for system calls"""
+    pass
 
 class SlaveMethods:
     '''
     Exported xmlrpc methods
     '''
-    def __init__(self, command_context, log_ctl, if_manager, net_namespaces,
-                 server_handler, slave_server):
+    def __init__(self, job_context, log_ctl, net_namespaces,
+                 server_handler, slave_config, slave_server):
         self._packet_captures = {}
-        self._if_manager = if_manager
-        self._command_context = command_context
+        self._if_manager = None
+        self._job_context = job_context
         self._log_ctl = log_ctl
         self._net_namespaces = net_namespaces
         self._server_handler = server_handler
         self._slave_server = slave_server
+        self._slave_config = slave_config
 
         self._capture_files = {}
         self._copy_targets = {}
@@ -63,37 +102,20 @@ class SlaveMethods:
         self._system_config = {}
         self.mroute_sockets = {}
 
-        self._cache = ResourceCache(lnst_config.get_option("cache", "dir"),
-                        lnst_config.get_option("cache", "expiration_period"))
+        self._cache = ResourceCache(slave_config.get_option("cache", "dir"),
+                        slave_config.get_option("cache", "expiration_period"))
 
-        self._resource_table = {'module': {}, 'tools': {}}
+        self._dynamic_modules = {}
+        self._dynamic_classes = {}
+        self._dynamic_objects = {}
 
-        self._bkp_nm_opt_val = lnst_config.get_option("environment", "use_nm")
+        self._bkp_nm_opt_val = slave_config.get_option("environment", "use_nm")
 
-    def hello(self, recipe_path):
-        self.machine_cleanup()
-        self.restore_nm_option()
-
+    def hello(self):
         logging.info("Recieved a controller connection.")
-        self.clear_resource_table()
-        self._cache.del_old_entries()
-        self.reset_file_transfers()
-
-        self._if_manager.rescan_devices()
-
-        date = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-        self._log_ctl.set_recipe(recipe_path, expand=date)
-        sleep(1)
 
         slave_desc = {}
         if check_process_running("NetworkManager"):
-            logging.warning("=============================================")
-            logging.warning("NetworkManager is running on a slave machine!")
-            if lnst_config.get_option("environment", "use_nm"):
-                logging.warning("Support of NM is still experimental!")
-            else:
-                logging.warning("Usage of NM is disabled!")
-            logging.warning("=============================================")
             slave_desc["nm_running"] = True
         else:
             slave_desc["nm_running"] = False
@@ -102,54 +124,143 @@ class SlaveMethods:
         r_release, _ = exec_cmd("cat /etc/redhat-release", False, False, False)
         slave_desc["kernel_release"] = k_release.strip()
         slave_desc["redhat_release"] = r_release.strip()
-        slave_desc["lnst_version"] = lnst_config.version
+        slave_desc["lnst_version"] = lnst_version
 
         return ("hello", slave_desc)
 
+    def prepare_machine(self):
+        self.machine_cleanup()
+        self.restore_nm_option()
+
+        self._cache.del_old_entries()
+        self.reset_file_transfers()
+        return True
+
+    def start_recipe(self, recipe_name):
+        date = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        self._log_ctl.set_recipe(recipe_name, expand=date)
+        sleep(1)
+
+        if check_process_running("NetworkManager"):
+            logging.warning("=============================================")
+            logging.warning("NetworkManager is running on a slave machine!")
+            if self._slave_config.get_option("environment", "use_nm"):
+                logging.warning("Support of NM is still experimental!")
+            else:
+                logging.warning("Usage of NM is disabled!")
+            logging.warning("=============================================")
+
+        for device in self._if_manager.get_devices():
+            try:
+                device.store_cleanup_data()
+            except DeviceDisabled:
+                pass
+
+        return True
+
     def bye(self):
         self.restore_system_config()
-        self.clear_resource_table()
         self._cache.del_old_entries()
         self.reset_file_transfers()
         self._remove_capture_files()
         return "bye"
 
-    def kill_cmds(self):
-        logging.info("Killing all forked processes.")
-        self._command_context.cleanup()
-        return "Commands killed"
+    def map_device_class(self, cls_name, module_name):
+        if cls_name in self._dynamic_classes:
+            return
 
-    def map_if_by_hwaddr(self, if_id, hwaddr):
-        devices = self.map_if_by_params(if_id, {'hwaddr' : hwaddr})
+        module = self._dynamic_modules[module_name]
+        cls = getattr(module, cls_name)
 
-        return devices
+        self._dynamic_classes["{}.{}".format(module_name, cls_name)] = cls
 
-    def map_if_by_params(self, if_id, params):
-        devices = self.get_devices_by_params(params)
+        setattr(Devices, cls_name, cls)
 
-        if len(devices) == 1:
-            dev = self._if_manager.get_device_by_params(params)
-            self._if_manager.map_if(if_id, dev.get_if_index())
+    def load_cached_module(self, module_name, res_hash):
+        self._cache.renew_entry(res_hash)
+        if module_name in self._dynamic_modules:
+            return
+        module_path = self._cache.get_path(res_hash)
+        module = imp.load_source(module_name, module_path)
+        self._dynamic_modules[module_name] = module
 
-        return devices
+    def init_cls(self, cls_name, module_name, args, kwargs):
+        module = self._dynamic_modules[module_name]
+        cls = getattr(module, cls_name)
 
-    def unmap_if(self, if_id):
-        self._if_manager.unmap_if(if_id)
+        self._dynamic_classes["{}.{}".format(module_name, cls_name)] = cls
+
+        new_obj = cls(*args, **kwargs)
+        self._dynamic_objects[id(new_obj)] = new_obj
+        return id(new_obj)
+
+    def init_if_manager(self):
+        self._if_manager = InterfaceManager(self._server_handler)
+        for cls_name in dir(Devices):
+            cls = getattr(Devices, cls_name)
+            if isclass(cls):
+                self._if_manager.add_device_class(cls_name, cls)
+
+        self._if_manager.rescan_devices()
+        self._server_handler.set_if_manager(self._if_manager)
         return True
 
+    def obj_method(self, obj_ref, name, args, kwargs):
+        try:
+            obj = self._dynamic_objects[obj_ref]
+            method = getattr(obj, name)
+            return method(*args, **kwargs)
+        except LnstError:
+            raise
+        except Exception as exc:
+            log_exc_traceback()
+            raise LnstError(exc)
+
+    def obj_getattr(self, obj_ref, name):
+        try:
+            obj = self._dynamic_objects[obj_ref]
+            return getattr(obj, name)
+        except LnstError:
+            raise
+        except Exception as exc:
+            log_exc_traceback()
+            raise LnstError(exc)
+
+    def obj_setattr(self, obj_ref, name, value):
+        try:
+            obj = self._dynamic_objects[obj_ref]
+            return setattr(obj, name, value)
+        except LnstError:
+            raise
+        except Exception as exc:
+            log_exc_traceback()
+            raise LnstError(exc)
+
+    def dev_method(self, ifindex, name, args, kwargs):
+        dev = self._if_manager.get_device(ifindex)
+        method = getattr(dev, name)
+
+        return method(*args, **kwargs)
+
+    def dev_getattr(self, ifindex, name):
+        dev = self._if_manager.get_device(ifindex)
+        return getattr(dev, name)
+
+    def dev_setattr(self, ifindex, name, value):
+        dev = self._if_manager.get_device(ifindex)
+        return setattr(dev, name, value)
+
     def get_devices(self):
-        self._if_manager.rescan_devices()
         devices = self._if_manager.get_devices()
         result = {}
         for device in devices:
-            result[device._if_index] = device.get_if_data()
+            result[device.ifindex] = device._get_if_data()
         return result
 
-    def get_device(self, if_index):
-        self._if_manager.rescan_devices()
-        device = self._if_manager.get_device(if_index)
+    def get_device(self, ifindex):
+        device = self._if_manager.get_device(ifindex)
         if device:
-            return device.get_if_data()
+            return device._get_if_data()
         else:
             return {}
 
@@ -160,7 +271,6 @@ class SlaveMethods:
         for entry in name_scan:
             if entry["name"] == devname:
                 netdevs.append(entry)
-
         return netdevs
 
     def get_devices_by_hwaddr(self, hwaddr):
@@ -171,26 +281,25 @@ class SlaveMethods:
                 entry = {"name": dev.get_name(),
                          "hwaddr": dev.get_hwaddr()}
                 matched.append(entry)
-
         return matched
 
     def get_devices_by_params(self, params):
         devices = self._if_manager.get_devices()
         matched = []
         for dev in devices:
-            dev_data = dev.get_if_data()
+            dev_data = dev._get_if_data()
             entry = {"name": dev.get_name(),
                      "hwaddr": dev.get_hwaddr()}
-            for key, value in params.iteritems():
+            for key, value in params.items():
                 if key not in dev_data or dev_data[key] != value:
                     entry = None
                     break
 
             if entry is not None:
                 matched.append(entry)
-
         return matched
 
+<<<<<<< HEAD
     def get_if_data(self, if_id):
         dev = self._if_manager.get_mapped_device(if_id)
         if dev is None:
@@ -369,43 +478,46 @@ class SlaveMethods:
             result = self._slave_server.wait_for_result(netns)
             if result["result"] != True:
                 raise Exception("Deconfiguration failed.")
+=======
+    def destroy_devices(self):
+        if self._if_manager is None:
+            return
+>>>>>>> jpirko/master
 
-            self.return_if_netns(if_id1)
+        devices = self._if_manager.get_devices()
+        for dev in devices:
+            try:
+                dev.destroy()
+            except (DeviceDisabled, DeviceDeleted, DeviceConfigValueError):
+                pass
+            self._if_manager.rescan_devices()
 
-        if dev2.get_netns() == None:
-            dev2.deconfigure()
-        else:
-            netns = dev2.get_netns()
+    # def add_route(self, if_id, dest):
+        # dev = self._if_manager.get_mapped_device(if_id)
+        # if dev is None:
+            # logging.error("Device with id '%s' not found." % if_id)
+            # return False
+        # dev.add_route(dest)
+        # return True
 
-            msg = {"type": "command", "method_name": "deconfigure_interface",
-                   "args": [if_id2]}
-            self._server_handler.send_data_to_netns(netns, msg)
-            result = self._slave_server.wait_for_result(netns)
-            if result["result"] != True:
-                raise Exception("Deconfiguration failed.")
+    # def del_route(self, if_id, dest):
+        # dev = self._if_manager.get_mapped_device(if_id)
+        # if dev is None:
+            # logging.error("Device with id '%s' not found." % if_id)
+            # return False
+        # dev.del_route(dest)
+        # return True
 
-            self.return_if_netns(if_id2)
-
-        dev1.destroy()
-        dev2.destroy()
-        dev1.del_configuration()
-        dev2.del_configuration()
-        return True
-
-    def deconfigure_interface(self, if_id):
-        device = self._if_manager.get_mapped_device(if_id)
-        if device is not None:
-            device.clear_configuration()
-        else:
-            logging.error("No device with id '%s' to deconfigure." % if_id)
-        return True
+    def create_device(self, clsname, args=[], kwargs={}):
+        dev =  self._if_manager.create_device(clsname, args, kwargs)
+        return {"ifindex": dev.ifindex, "name": dev.name}
 
     def start_packet_capture(self, filt):
         if not is_installed("tcpdump"):
             raise Exception("Can't start packet capture, tcpdump not available")
 
         files = {}
-        for if_id, dev in self._if_manager.get_mapped_devices().iteritems():
+        for if_id, dev in self._if_manager.get_mapped_devices().items():
             if dev.get_netns() != None:
                 continue
             dev_name = dev.get_name()
@@ -431,7 +543,7 @@ class SlaveMethods:
         if self._packet_captures == None:
             return True
 
-        for if_index, pcap in self._packet_captures.iteritems():
+        for ifindex, pcap in self._packet_captures.items():
             pcap.stop()
 
         self._packet_captures.clear()
@@ -439,7 +551,7 @@ class SlaveMethods:
         return True
 
     def _remove_capture_files(self):
-        for key, name in self._capture_files.iteritems():
+        for key, name in self._capture_files.items():
             logging.debug("Removing temporary packet capture file %s", name)
             os.unlink(name)
 
@@ -462,7 +574,7 @@ class SlaveMethods:
 
     def restore_system_config(self):
         logging.info("Restoring system configuration")
-        for option, values in self._system_config.iteritems():
+        for option, values in self._system_config.items():
             try:
                 cmd_str = "echo \"%s\" >%s" % (values["initial_val"], option)
                 (stdout, stderr) = exec_cmd(cmd_str)
@@ -489,54 +601,31 @@ class SlaveMethods:
 
         return int(remaining)
 
-    def run_command(self, command):
-        cmd = NetTestCommand(self._command_context, command,
-                                    self._resource_table, self._log_ctl)
+    def run_job(self, job):
+        job_instance = Job(job, self._log_ctl)
+        self._job_context.add_job(job_instance)
 
-        if self._command_context.get_cmd(cmd.get_id()) != None:
-            prev_cmd = self._command_context.get_cmd(cmd.get_id())
-            if not prev_cmd.get_result_sent():
-                if cmd.get_id() is None:
-                    raise Exception("Previous foreground command still "\
-                                    "running!")
-                else:
-                    raise Exception("Different command with id '%s' "\
-                                    "still running!" % cmd.get_id())
-            else:
-                self._command_context.del_cmd(cmd)
-        self._command_context.add_cmd(cmd)
-
-        res = cmd.run()
-        if not cmd.forked():
-            self._command_context.del_cmd(cmd)
-
-        if command["type"] == "config":
-            if res["passed"]:
-                self._update_system_config(res["res_data"]["options"],
-                                           command["persistent"])
-            else:
-                err = "Error occured while setting system "\
-                      "configuration (%s)" % res["res_data"]["err_msg"]
-                logging.error(err)
+        res = job_instance.run()
 
         return res
 
-    def kill_command(self, id):
-        cmd = self._command_context.get_cmd(id)
-        if cmd is not None:
-            if not cmd.get_result_sent():
-                cmd.kill(None)
-                result = cmd.get_result()
-                cmd.set_result_sent()
-                return result
-            else:
-                pass
-        else:
-            raise Exception("No command with id '%s'." % id)
+    def kill_job(self, job_id, signal):
+        job = self._job_context.get_job(job_id)
+
+        if job is None:
+            logging.error("No job %s found" % job_id)
+            return False
+
+        return job.kill(signal)
+
+    def kill_jobs(self):
+        logging.info("Killing all forked processes.")
+        self._job_context.cleanup()
+        return "Commands killed"
 
     def machine_cleanup(self):
         logging.info("Performing machine cleanup.")
-        self._command_context.cleanup()
+        self._job_context.cleanup()
 
         for mroute_soc in self.mroute_sockets.values():
             mroute_soc.close()
@@ -545,29 +634,31 @@ class SlaveMethods:
 
         self.restore_system_config()
 
-        devs = self._if_manager.get_mapped_devices()
-        for if_id, dev in devs.iteritems():
-            peer = dev.get_peer()
-            if peer == None:
-                dev.clear_configuration()
-            else:
-                peer_if_index = peer.get_if_index()
-                peer_id = self._if_manager.get_id_by_if_index(peer_if_index)
-                self.deconfigure_if_pair(if_id, peer_id)
+        if self._if_manager is not None:
+            self._if_manager.deconfigure_all()
 
-        self._if_manager.deconfigure_all()
-
-        for netns in self._net_namespaces.keys():
+        for netns in list(self._net_namespaces.keys()):
             self.del_namespace(netns)
         self._net_namespaces = {}
 
-        self._if_manager.clear_if_mapping()
+        for obj_id, obj in list(self._dynamic_objects.items()):
+            del obj
+
+        for cls_name in dir(Devices):
+            cls = getattr(Devices, cls_name)
+            if isclass(cls):
+                delattr(Devices, cls_name)
+
+        for module_name, module in list(self._dynamic_modules.items()):
+            del sys.modules[module_name]
+
+        self._dynamic_objects = {}
+        self._dynamic_classes = {}
+        self._dynamic_modules = {}
+        self._if_manager = None
+        self._server_handler.set_if_manager(None)
         self._cache.del_old_entries()
         self._remove_capture_files()
-        return True
-
-    def clear_resource_table(self):
-        self._resource_table = {'module': {}, 'tools': {}}
         return True
 
     def has_resource(self, res_hash):
@@ -576,21 +667,12 @@ class SlaveMethods:
 
         return False
 
-    def map_resource(self, res_hash, res_type, res_name):
-        resource_location = self._cache.get_path(res_hash)
-
-        if not res_type in self._resource_table:
-            self._resource_table[res_type] = {}
-
-        self._resource_table[res_type][res_name] = resource_location
-        self._cache.renew_entry(res_hash)
-
-        return True
-
-    def add_resource_to_cache(self, file_hash, local_path, name,
-                                res_hash, res_type):
-        self._cache.add_cache_entry(file_hash, local_path, name, res_type)
-        return True
+    def add_resource_to_cache(self, res_type, local_path, name):
+        if res_type == "file":
+            self._cache.add_file_entry(local_path, name)
+            return True
+        else:
+            raise Exception("Unknown resource type")
 
     def start_copy_to(self, filepath=None):
         if filepath in self._copy_targets:
@@ -605,9 +687,9 @@ class SlaveMethods:
 
         return filepath
 
-    def copy_part_to(self, filepath, binary_data):
+    def copy_part_to(self, filepath, data):
         if self._copy_targets[filepath]:
-            self._copy_targets[filepath].write(binary_data.data)
+            self._copy_targets[filepath].write(data)
             return True
 
         return False
@@ -629,7 +711,7 @@ class SlaveMethods:
         return True
 
     def copy_part_from(self, filepath, buffsize):
-        data = Binary(self._copy_sources[filepath].read(buffsize))
+        data = self._copy_sources[filepath].read(buffsize)
         return data
 
     def finish_copy_from(self, filepath):
@@ -641,11 +723,11 @@ class SlaveMethods:
         return False
 
     def reset_file_transfers(self):
-        for file_handle in self._copy_targets.itervalues():
+        for file_handle in self._copy_targets.values():
             file_handle.close()
         self._copy_targets = {}
 
-        for file_handle in self._copy_sources.itervalues():
+        for file_handle in self._copy_sources.values():
             file_handle.close()
         self._copy_sources = {}
 
@@ -653,26 +735,27 @@ class SlaveMethods:
         logging.warning("====================================================")
         logging.warning("Enabling use of NetworkManager on controller request")
         logging.warning("====================================================")
-        val = lnst_config.get_option("environment", "use_nm")
-        lnst_config.set_option("environment", "use_nm", True)
+        val = self._slave_config.get_option("environment", "use_nm")
+        self._slave_config.set_option("environment", "use_nm", True)
         return val
 
     def disable_nm(self):
         logging.warning("=====================================================")
         logging.warning("Disabling use of NetworkManager on controller request")
         logging.warning("=====================================================")
-        val = lnst_config.get_option("environment", "use_nm")
-        lnst_config.set_option("environment", "use_nm", False)
+        val = self._slave_config.get_option("environment", "use_nm")
+        self._slave_config.set_option("environment", "use_nm", False)
         return val
 
     def restore_nm_option(self):
-        val = lnst_config.get_option("environment", "use_nm")
+        val = self._slave_config.get_option("environment", "use_nm")
         if val == self._bkp_nm_opt_val:
             return val
         logging.warning("=========================================")
         logging.warning("Restoring use_nm option to original value")
         logging.warning("=========================================")
-        lnst_config.set_option("environment", "use_nm", self._bkp_nm_opt_val)
+        self._slave_config.set_option("environment", "use_nm",
+                                      self._bkp_nm_opt_val)
         return val
 
     def add_namespace(self, netns):
@@ -686,8 +769,17 @@ class SlaveMethods:
                 self._net_namespaces[netns] = {"pid": pid,
                                                "pipe": read_pipe}
                 self._server_handler.add_netns(netns, read_pipe)
+<<<<<<< HEAD
                 result = self._slave_server.wait_for_result(netns)
                 return result["result"]
+=======
+
+                result = self._slave_server.wait_for_result(netns)
+                if result["result"] != True:
+                    raise Exception("Namespace creation failed")
+
+                return True
+>>>>>>> jpirko/master
             elif pid == 0:
                 self._slave_server.set_netns_sighandlers()
                 #create new network namespace
@@ -727,17 +819,14 @@ class SlaveMethods:
                 self._server_handler.clear_connections()
                 self._server_handler.clear_netns_connections()
 
-                self._if_manager.reconnect_netlink()
-                self._if_manager.clear_if_mapping()
-                self._server_handler.add_connection('netlink',
-                                            self._if_manager.get_nl_socket())
-
                 self._server_handler.set_netns(netns)
                 self._server_handler.set_ctl_sock((write_pipe, "root_netns"))
 
                 self._log_ctl.disable_logging()
                 self._log_ctl.set_origin_name(netns)
                 self._log_ctl.set_connection(write_pipe)
+
+                self.init_if_manager()
 
                 logging.debug("Created network namespace %s" % netns)
                 return True
@@ -772,6 +861,7 @@ class SlaveMethods:
             del self._net_namespaces[netns]
             return True
 
+<<<<<<< HEAD
     def get_routes(self, route_filter):
         try:
             route_output, _ = exec_cmd("ip route show %s" % route_filter)
@@ -844,26 +934,35 @@ class SlaveMethods:
         self._server_handler.send_data_to_netns(netns, msg)
         result = self._slave_server.wait_for_result(netns)
         return result
+=======
+    def set_dev_netns(self, dev, dst):
+        exec_cmd("ip link set %s netns %s" % (dev.name, dst))
+        self._if_manager.untrack_device(dev)
+        dev._deleted = True
+        self._if_manager.rescan_devices()
+        #TODO check if device appeared in the destination namespace
+        return True
+>>>>>>> jpirko/master
 
-    def return_if_netns(self, if_id):
-        device = self._if_manager.get_mapped_device(if_id)
-        if device.get_netns() == None:
-            dev_name = device.get_name()
-            ppid = os.getppid()
-            exec_cmd("ip link set %s netns %d" % (dev_name, ppid))
-            self._if_manager.unmap_if(if_id)
-            return True
-        else:
-            netns = device.get_netns()
-            msg = {"type": "command", "method_name": "return_if_netns",
-                   "args": [if_id]}
-            self._server_handler.send_data_to_netns(netns, msg)
-            result = self._slave_server.wait_for_result(netns)
-            if result["result"] != True:
-                raise Exception("Return from netns failed.")
+    # def return_if_netns(self, if_id):
+        # device = self._if_manager.get_mapped_device(if_id)
+        # if device.get_netns() == None:
+            # dev_name = device.get_name()
+            # ppid = os.getppid()
+            # exec_cmd("ip link set %s netns %d" % (dev_name, ppid))
+            # self._if_manager.unmap_if(if_id)
+            # return True
+        # else:
+            # netns = device.get_netns()
+            # msg = {"type": "command", "method_name": "return_if_netns",
+                   # "args": [if_id]}
+            # self._server_handler.send_data_to_netns(netns, msg)
+            # result = self._slave_server.wait_for_result(netns)
+            # if result["result"] != True:
+                # raise Exception("Return from netns failed.")
 
-            device.set_netns(None)
-            return True
+            # device.set_netns(None)
+            # return True
 
     def add_br_vlan(self, if_id, br_vlan_info):
         dev = self._if_manager.get_mapped_device(if_id)
@@ -953,6 +1052,7 @@ class SlaveMethods:
         brt.set_state(br_state_info)
         return True
 
+<<<<<<< HEAD
     def set_br_mcast_snooping(self, if_id, set_on = True):
         dev = self._if_manager.get_mapped_device(if_id)
         if not dev:
@@ -1223,8 +1323,10 @@ class SlaveMethods:
             logging.error("Device with id '%s' not found." % if_id)
             return False
 
+=======
+>>>>>>> jpirko/master
 class ServerHandler(ConnectionHandler):
-    def __init__(self, addr):
+    def __init__(self, addr, slave_config):
         super(ServerHandler, self).__init__()
         self._netns_con_mapping = {}
         try:
@@ -1241,7 +1343,7 @@ class ServerHandler(ConnectionHandler):
 
         self._if_manager = None
 
-        self._security = lnst_config.get_section_values("security")
+        self._security = slave_config.get_section_values("security")
 
     def set_if_manager(self, if_manager):
         self._if_manager = if_manager
@@ -1261,15 +1363,14 @@ class ServerHandler(ConnectionHandler):
         return self._c_socket
 
     def get_ctl_sock(self):
-        if self._c_socket != None:
+        try:
             return self._c_socket[0]
-        else:
+        except:
             return None
 
     def set_ctl_sock(self, sock):
         if self._c_socket != None:
-            self._c_socket.close()
-            self._c_socket = None
+            self.close_c_sock()
         self._c_socket = sock
         self.add_connection(self._c_socket[1], self._c_socket[0])
 
@@ -1282,15 +1383,14 @@ class ServerHandler(ConnectionHandler):
         self.remove_connection(self._c_socket[0])
         self._c_socket = None
 
-    def check_connections(self):
-        msgs = super(ServerHandler, self).check_connections()
-        if 'netlink' not in self._connection_mapping:
-            self._if_manager.reconnect_netlink()
-            self.add_connection('netlink', self._if_manager.get_nl_socket())
+    def check_connections(self, timeout=None):
+        if self._if_manager is not None:
+            self._if_manager.handle_netlink_msgs()
+        msgs = super(ServerHandler, self).check_connections(timeout=timeout)
         return msgs
 
     def get_messages(self):
-        messages = self.check_connections()
+        messages = self.check_connections(timeout=MAX_SERVER_HANG)
 
         #push ctl messages to the end of message queue, this ensures that
         #update messages are handled first
@@ -1306,7 +1406,7 @@ class ServerHandler(ConnectionHandler):
         addr = self._c_socket[1]
         if self.get_connection(addr) == None:
             logging.info("Lost controller connection.")
-            self._c_socket = None
+            self.close_c_sock()
         return messages
 
     def get_messages_from_con(self, con_id):
@@ -1316,7 +1416,7 @@ class ServerHandler(ConnectionHandler):
             connection = self._netns_con_mapping[con_id]
         else:
             raise Exception("Unknown connection id '%s'." % con_id)
-        return self._check_connections([connection])
+        return self._check_connections([connection], timeout=None)
 
     def send_data_to_ctl(self, data):
         if self._c_socket != None:
@@ -1324,6 +1424,7 @@ class ServerHandler(ConnectionHandler):
                 data = {"type": "from_netns",
                         "netns": self._netns,
                         "data": data}
+            data = device_to_deviceref(data)
             return send_data(self._c_socket[0], data)
         else:
             return False
@@ -1340,7 +1441,7 @@ class ServerHandler(ConnectionHandler):
         self._netns_con_mapping = {}
 
     def update_connections(self, connections):
-        for key, connection in connections.iteritems():
+        for key, connection in connections.items():
             self.remove_connection_by_id(key)
             self.add_connection(key, connection)
 
@@ -1362,23 +1463,84 @@ class ServerHandler(ConnectionHandler):
             self._connections.remove(con)
         self._netns_con_mapping = {}
 
+
+def device_to_deviceref(obj):
+    try:
+        Device = Devices.Device
+    except:
+        return obj
+
+    if isinstance(obj, Device):
+        dev_ref = DeviceRef(obj.ifindex)
+        return dev_ref
+    elif isinstance(obj, dict):
+        new_dict = {}
+        for key, value in list(obj.items()):
+            new_dict[key] = device_to_deviceref(value)
+        return new_dict
+    elif isinstance(obj, list):
+        new_list = []
+        for value in obj:
+            new_list.append(device_to_deviceref(value))
+        return new_list
+    elif isinstance(obj, tuple):
+        new_list = []
+        for value in obj:
+            new_list.append(device_to_deviceref(value))
+        return tuple(new_list)
+    else:
+        return obj
+
+def deviceref_to_device(if_manager, obj):
+    try:
+        from lnst.Tests.BaseTestModule import BaseTestModule
+    except:
+        BaseTestModule = None
+
+    if isinstance(obj, DeviceRef):
+        dev = if_manager.get_device(obj.ifindex)
+        return dev
+    elif isinstance(obj, dict):
+        new_dict = {}
+        for key, value in list(obj.items()):
+            new_dict[key] = deviceref_to_device(if_manager, value)
+        return new_dict
+    elif isinstance(obj, list):
+        new_list = []
+        for value in obj:
+            new_list.append(deviceref_to_device(if_manager, value))
+        return new_list
+    elif isinstance(obj, tuple):
+        new_list = []
+        for value in obj:
+            new_list.append(deviceref_to_device(if_manager, value))
+        return tuple(new_list)
+    elif isinstance(obj, Parameters):
+        for param_name, param in obj:
+            setattr(obj, param_name, deviceref_to_device(if_manager, param))
+        return obj
+    elif BaseTestModule is not None and isinstance(obj, BaseTestModule):
+        obj.params = deviceref_to_device(if_manager, obj.params)
+        return obj
+    else:
+        return obj
+
 class NetTestSlave:
-    def __init__(self, log_ctl):
+    def __init__(self, log_ctl, slave_config):
+        self._slave_config = slave_config
         die_when_parent_die()
 
-        self._cmd_context = NetTestCommandContext()
-        port = lnst_config.get_option("environment", "rpcport")
+        self._job_context = JobContext()
+        port = slave_config.get_option("environment", "rpcport")
         logging.info("Using RPC port %d." % port)
-        self._server_handler = ServerHandler(("", port))
-        self._if_manager = InterfaceManager(self._server_handler)
-
-        self._server_handler.set_if_manager(self._if_manager)
+        self._server_handler = ServerHandler(("", port), slave_config)
 
         self._net_namespaces = {}
 
-        self._methods = SlaveMethods(self._cmd_context, log_ctl,
-                                     self._if_manager, self._net_namespaces,
-                                     self._server_handler, self)
+        self._methods = SlaveMethods(self._job_context, log_ctl,
+                                     self._net_namespaces,
+                                     self._server_handler, slave_config,
+                                     self)
 
         self.register_die_signal(signal.SIGHUP)
         self.register_die_signal(signal.SIGINT)
@@ -1388,25 +1550,24 @@ class NetTestSlave:
 
         self._log_ctl = log_ctl
 
-        self._server_handler.add_connection('netlink',
-                                            self._if_manager.get_nl_socket())
-
     def run(self):
-        while not self._finished:
-            if self._server_handler.get_ctl_sock() == None:
-                self._log_ctl.cancel_connection()
-                try:
-                    logging.info("Waiting for connection.")
-                    self._server_handler.accept_connection()
-                except (socket.error, SecSocketException):
-                    continue
-                self._log_ctl.set_connection(
-                                            self._server_handler.get_ctl_sock())
+        while True:
+            try:
+                if self._server_handler.get_ctl_sock() is None:
+                    self._log_ctl.cancel_connection()
+                    try:
+                        logging.info("Waiting for connection.")
+                        self._server_handler.accept_connection()
+                    except (socket.error, SecSocketException):
+                        continue
+                    self._log_ctl.set_connection(self._server_handler.get_ctl_sock())
 
-            msgs = self._server_handler.get_messages()
+                msgs = self._server_handler.get_messages()
 
-            for msg in msgs:
-                self._process_msg(msg[1])
+                for msg in msgs:
+                    self._process_msg(msg[1])
+            except SystemCallException:
+                break
 
         self._methods.machine_cleanup()
 
@@ -1428,24 +1589,29 @@ class NetTestSlave:
         if msg["type"] == "command":
             method = getattr(self._methods, msg["method_name"], None)
             if method != None:
+                if_manager = self._methods._if_manager
+                if if_manager is not None:
+                    args = deviceref_to_device(if_manager, msg["args"])
+                    kwargs = deviceref_to_device(if_manager, msg["kwargs"])
+                else:
+                    args = msg["args"]
+                    kwargs = msg["kwargs"]
+
                 try:
-                    result = method(*msg["args"])
-                except:
+                    result = method(*args, **kwargs)
+                except LnstError as e:
                     log_exc_traceback()
-                    type, value, tb = sys.exc_info()
-                    exc_trace = ''.join(traceback.format_exception(type,
-                                                                   value, tb))
-                    response = {"type": "exception", "Exception": value}
+                    response = {"type": "exception", "Exception": e}
 
                     self._server_handler.send_data_to_ctl(response)
                     return
 
-                if result != None:
-                    response = {"type": "result", "result": result}
-                    self._server_handler.send_data_to_ctl(response)
+                response = {"type": "result", "result": result}
+                response = device_to_deviceref(response)
+                self._server_handler.send_data_to_ctl(response)
             else:
-                err = "Method '%s' not supported." % msg["method_name"]
-                response = {"type": "error", "err": err}
+                err = LnstError("Method '%s' not supported." % msg["method_name"])
+                response = {"type": "exception", "Exception": err}
                 self._server_handler.send_data_to_ctl(response)
         elif msg["type"] == "log":
             logger = logging.getLogger()
@@ -1458,48 +1624,32 @@ class NetTestSlave:
             else:
                 logging.debug("Recieved an exception from foreground command")
             logging.debug(msg["Exception"])
-            cmd = self._cmd_context.get_cmd(msg["cmd_id"])
-            cmd.join()
-            self._cmd_context.del_cmd(cmd)
+            job = self._job_context.get_cmd(msg["job_id"])
+            job.join()
+            self._job_context.del_cmd(job)
             self._server_handler.send_data_to_ctl(msg)
-        elif msg["type"] == "result":
-            if msg["cmd_id"] == None:
-                del msg["cmd_id"]
-                self._server_handler.send_data_to_ctl(msg)
-                cmd = self._cmd_context.get_cmd(None)
-                cmd.join()
-                cmd.set_result_sent()
-            else:
-                cmd = self._cmd_context.get_cmd(msg["cmd_id"])
-                cmd.join()
-                del msg["cmd_id"]
+        elif msg["type"] == "job_finished":
+            job = self._job_context.get_job(msg["job_id"])
+            job.join()
 
-                cmd.set_result(msg["result"])
-                if cmd.finished():
-                    msg["result"] = cmd.get_result()
-                    self._server_handler.send_data_to_ctl(msg)
-                    cmd.set_result_sent()
-        elif msg["type"] == "netlink":
-            self._if_manager.handle_netlink_msgs(msg["data"])
+            job.set_finished(msg["result"])
+            self._server_handler.send_data_to_ctl(msg)
         elif msg["type"] == "from_netns":
             self._server_handler.send_data_to_ctl(msg["data"])
         elif msg["type"] == "to_netns":
             netns = msg["netns"]
             try:
                 self._server_handler.send_data_to_netns(netns, msg["data"])
-            except:
+            except LnstError as e:
                 log_exc_traceback()
-                type, value, tb = sys.exc_info()
-                exc_trace = ''.join(traceback.format_exception(type,
-					   value, tb))
-                response = {"type": "exception", "Exception": value}
+                response = {"type": "exception", "Exception": e}
 
                 self._server_handler.send_data_to_ctl(response)
                 return
         else:
             raise Exception("Recieved unknown command")
 
-        pipes = self._cmd_context.get_read_pipes()
+        pipes = self._job_context.get_parent_pipes()
         self._server_handler.update_connections(pipes)
 
     def register_die_signal(self, signum):
@@ -1507,7 +1657,7 @@ class NetTestSlave:
 
     def _signal_die_handler(self, signum, frame):
         logging.info("Caught signal %d -> dying" % signum)
-        self._finished = True
+        raise SystemCallException()
 
     def _parent_resend_signal_handler(self, signum, frame):
         logging.info("Caught signal %d -> resending to parent" % signum)

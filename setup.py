@@ -1,29 +1,25 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
+
 """
 Install script for lnst
 
-This script will install both lnst controller and slave
-to your system. To install LNST, execute it as follows:
+This script will install LNST to your system.
+To install LNST, execute it as follows:
 
-    ./setup.py install
+    pip3 install -r requirements.txt .
 
 To install lnst to a different root use:
 
-    .setup.py install --root=<path>
+    pip3 install -r requirements.txt --prefix <path> .
 
 """
 
-__author__ = """
-rpazdera@redhat.com (Radek Pazdera)
-"""
-
-import sys
 import re
 import gzip
-import os
 from time import gmtime, strftime
-from distutils.core import setup
-from lnst.Common.Version import LNSTMajorVersion
+from setuptools import setup, find_packages
+from lnst.Common.Version import lnst_version
+
 
 def process_template(template_path, values):
     template_name_re = "\.in$"
@@ -34,11 +30,12 @@ def process_template(template_path, values):
     t = open(template_path, "r")
     f = open(file_path, "w")
     template = t.read()
-    for var, value in values.iteritems():
+    for var, value in values.items():
         template = template.replace("@%s@" % var, value)
     f.write(template)
     f.close()
     t.close()
+
 
 def gzip_file(path):
     src = open(path, "rb")
@@ -47,13 +44,12 @@ def gzip_file(path):
     dst.close()
     src.close()
 
+
 # Various paths
 CONF_DIR = "/etc/"
 BASH_COMP_DIR = CONF_DIR + "bash_completion.d/"
 MAN_DIR = "/usr/share/man/man1/"
 
-CTL_MODULES_LOCATIONS = "/usr/share/lnst/test_modules/"
-CTL_TOOLS_LOCATIONS = "/usr/share/lnst/test_tools/"
 CTL_RESOURCE_DIR = "/usr/share/lnst/"
 CTL_LOGS_DIR = "~/.lnst/logs/"
 
@@ -62,26 +58,22 @@ SLAVE_CACHE_DIR = "/var/cache/lnst"
 
 # Process templated files
 TEMPLATES_VALUES = {
-"conf_dir": CONF_DIR,
-"man_dir": MAN_DIR,
+    "conf_dir": CONF_DIR,
+    "man_dir": MAN_DIR,
 
-"ctl_modules_locations": CTL_MODULES_LOCATIONS,
-"ctl_tools_locations": CTL_TOOLS_LOCATIONS,
-"ctl_resource_dir": CTL_RESOURCE_DIR,
-"ctl_logs_dir": CTL_LOGS_DIR,
+    "ctl_resource_dir": CTL_RESOURCE_DIR,
+    "ctl_logs_dir": CTL_LOGS_DIR,
 
-"slave_logs_dir": SLAVE_LOGS_DIR,
-"slave_cache_dir": SLAVE_CACHE_DIR,
+    "slave_logs_dir": SLAVE_LOGS_DIR,
+    "slave_cache_dir": SLAVE_CACHE_DIR,
 
-"date": strftime("%Y-%m-%d", gmtime())
+    "date": strftime("%Y-%m-%d", gmtime())
 }
 
 TEMPLATES = [
-"install/lnst-ctl.conf.in",
-"install/lnst-slave.conf.in",
-"install/lnst-ctl.1.in",
-"install/lnst-slave.1.in",
-"install/lnst-pool-wizard.1.in"
+    "install/lnst-ctl.conf.in",
+    "install/lnst-slave.conf.in",
+    "install/lnst-slave.1.in",
 ]
 
 for template in TEMPLATES:
@@ -89,11 +81,8 @@ for template in TEMPLATES:
 # ---
 
 # Pack man pages
-gzip_file("install/lnst-ctl.1")
 gzip_file("install/lnst-slave.1")
-gzip_file("install/lnst-pool-wizard.1")
 # ---
-
 
 LONG_DESC = """LNST
 
@@ -104,6 +93,7 @@ For detailed description of the architecture of LNST please refer to
 project website <https://fedorahosted.org/lnst>.
 """
 
+<<<<<<< HEAD
 PACKAGES = ["lnst", "lnst.Common", "lnst.Controller", "lnst.Slave",
             "lnst.RecipeCommon" ]
 SCRIPTS = ["lnst-ctl", "lnst-slave", "lnst-pool-wizard"]
@@ -134,68 +124,31 @@ TEST_MODULES = [
          "test_modules/TRexClient.py"]
     )
 ]
+=======
+SCRIPTS = ["lnst-slave"]
+>>>>>>> jpirko/master
 
-MULTICAST_TEST_TOOLS = [
-    (CTL_TOOLS_LOCATIONS + "multicast",
-        ["test_tools/multicast/igmp_utils.h",
-         "test_tools/multicast/lnst-setup.sh",
-         "test_tools/multicast/Makefile",
-         "test_tools/multicast/multicast_utils.h",
-         "test_tools/multicast/parameters_igmp.h",
-         "test_tools/multicast/parameters_multicast.h",
-         "test_tools/multicast/README",
-         "test_tools/multicast/sockopt_utils.h"]),
-    (CTL_TOOLS_LOCATIONS + "multicast/client",
-        ["test_tools/multicast/client/send_igmp_query.c",
-         "test_tools/multicast/client/send_simple.c"]),
-    (CTL_TOOLS_LOCATIONS + "multicast/offline",
-        ["test_tools/multicast/offline/max_groups.c",
-         "test_tools/multicast/offline/sockopt_block_source.c",
-         "test_tools/multicast/offline/sockopt_if.c",
-         "test_tools/multicast/offline/sockopt_loop.c",
-         "test_tools/multicast/offline/sockopt_membership.c",
-         "test_tools/multicast/offline/sockopt_source_membership.c",
-         "test_tools/multicast/offline/sockopt_ttl.c"]),
-    (CTL_TOOLS_LOCATIONS + "multicast/server",
-        ["test_tools/multicast/server/recv_block_source.c",
-         "test_tools/multicast/server/recv_membership.c",
-         "test_tools/multicast/server/recv_simple.c",
-         "test_tools/multicast/server/recv_source_membership.c"]),
-    (CTL_TOOLS_LOCATIONS + "tcp_conn",
-        ["test_tools/tcp_conn/lnst-setup.sh",
-         "test_tools/tcp_conn/Makefile",
-         "test_tools/tcp_conn/tcp_connect.c",
-         "test_tools/tcp_conn/tcp_listen.c"])
-]
-
-MAN_PAGES = [(MAN_DIR, ["install/lnst-ctl.1.gz", "install/lnst-slave.1.gz",
-                        "install/lnst-pool-wizard.1.gz"])]
+MAN_PAGES = [(MAN_DIR, ["install/lnst-slave.1.gz"])]
 
 CONFIG = [(CONF_DIR, ["install/lnst-ctl.conf", "install/lnst-slave.conf"])]
 
-BASH_COMP = [(BASH_COMP_DIR, ["install/lnst-ctl.bash",
-                              "install/lnst-slave.bash",
-                              "install/lnst-pool-wizard.bash"])]
+BASH_COMP = [(BASH_COMP_DIR, ["install/lnst-slave.bash"])]
 
-SCHEMAS = [(CTL_RESOURCE_DIR, ["schema-recipe.rng", "schema-sm.rng"])]
+SCHEMAS = [(CTL_RESOURCE_DIR, ["schema-sm.rng"])]
 
-RESULT_XSLT_DATA = [(CTL_RESOURCE_DIR + "result_xslt/",
-                     ["result_xslt/" + f for f in os.listdir("result_xslt")])]
-
-DATA_FILES = CONFIG + TEST_MODULES + MULTICAST_TEST_TOOLS + MAN_PAGES + \
-             SCHEMAS + BASH_COMP + RECIPE_FILES + RESULT_XSLT_DATA
+DATA_FILES = CONFIG + MAN_PAGES + SCHEMAS + BASH_COMP
 
 setup(name="lnst",
-    version=LNSTMajorVersion,
-    description="Linux Network Stack Test",
-    author="LNST Team",
-    author_email="lnst-developers@lists.fedorahosted.org",
-    maintainer="Jiri Pirko",
-    maintainer_email="jiri@resnulli.us",
-    url="http://lnst-project.org",
-    long_description=LONG_DESC,
-    platforms=["linux"],
-    license=["GNU GPLv2"],
-    packages=PACKAGES,
-    scripts=SCRIPTS,
-    data_files=DATA_FILES)
+      version=lnst_version.version,
+      description="Linux Network Stack Test",
+      author="LNST Team",
+      author_email="lnst-developers@lists.fedorahosted.org",
+      maintainer="Ondrej Lichtner",
+      maintainer_email="olichtne@redhat.com",
+      url="http://lnst-project.org",
+      long_description=LONG_DESC,
+      platforms=["linux"],
+      license=["GNU GPLv2"],
+      packages=find_packages(),
+      scripts=SCRIPTS,
+      data_files=DATA_FILES)

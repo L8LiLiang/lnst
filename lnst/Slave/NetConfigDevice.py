@@ -343,7 +343,7 @@ class NetConfigDeviceMacvlan(NetConfigDeviceGeneric):
     _modulename = "macvlan"
 
     def create(self):
-        config = self._dev_config;
+        config = self._dev_config
         realdev_id = config["slaves"][0]
         realdev_name = self._if_manager.get_mapped_device(realdev_id).get_name()
         dev_name = config["name"]
@@ -372,7 +372,7 @@ class NetConfigDeviceVlan(NetConfigDeviceGeneric):
         return False
 
     def _get_vlan_info(self):
-        config = self._dev_config;
+        config = self._dev_config
         realdev_id = get_slaves(config)[0]
         realdev_name = self._if_manager.get_mapped_device(realdev_id).get_name()
         dev_name = config["name"]
@@ -601,7 +601,7 @@ class NetConfigDeviceOvsBridge(NetConfigDeviceGeneric):
         br_name = self._dev_config["name"]
 
         bond_ports = []
-        for bond in self._dev_config["ovs_conf"]["bonds"].itervalues():
+        for bond in self._dev_config["ovs_conf"]["bonds"].values():
             for slave_id in bond["slaves"]:
                 bond_ports.append(slave_id)
 
@@ -616,7 +616,7 @@ class NetConfigDeviceOvsBridge(NetConfigDeviceGeneric):
                 options += " %s=%s" % (opt[0], opt[1])
 
             vlan_tags = []
-            for tag, vlan in vlans.iteritems():
+            for tag, vlan in vlans.items():
                 if slave_id in vlan["slaves"]:
                     vlan_tags.append(tag)
             if len(vlan_tags) == 0:
@@ -636,7 +636,7 @@ class NetConfigDeviceOvsBridge(NetConfigDeviceGeneric):
         br_name = self._dev_config["name"]
 
         bond_ports = []
-        for bond in self._dev_config["ovs_conf"]["bonds"].itervalues():
+        for bond in self._dev_config["ovs_conf"]["bonds"].values():
             for slave_id in bond["slaves"]:
                 bond_ports.append(slave_id)
 
@@ -703,7 +703,7 @@ class NetConfigDeviceOvsBridge(NetConfigDeviceGeneric):
         br_name = self._dev_config["name"]
 
         bonds = self._dev_config["ovs_conf"]["bonds"]
-        for bond_id, bond in bonds.iteritems():
+        for bond_id, bond in bonds.items():
             ifaces = ""
             for slave_id in bond["slaves"]:
                 slave_dev = self._if_manager.get_mapped_device(slave_id)
@@ -719,7 +719,7 @@ class NetConfigDeviceOvsBridge(NetConfigDeviceGeneric):
         br_name = self._dev_config["name"]
 
         bonds = self._dev_config["ovs_conf"]["bonds"]
-        for bond_id, bond in bonds.iteritems():
+        for bond_id, bond in bonds.items():
             exec_cmd("ovs-vsctl del-port %s %s" % (br_name, bond_id))
 
     def _add_flow_entries(self):

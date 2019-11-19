@@ -13,7 +13,7 @@ olichtne@redhat.com (Ondrej Lichtner)
 
 import select
 import socket
-from _multiprocessing import Connection
+from multiprocessing.connection import Connection
 from pyroute2 import IPRSocket
 from lnst.Common.SecureSocket import SecureSocket, SecSocketException
 
@@ -30,10 +30,7 @@ def send_data(s, data):
     return True
 
 def recv_data(s):
-    if isinstance(s, IPRSocket):
-        msg = s.get()
-        data = {"type": "netlink", "data": msg}
-    elif isinstance(s, SecureSocket):
+    if isinstance(s, SecureSocket):
         try:
             data = s.recv_msg()
         except SecSocketException:
@@ -50,19 +47,19 @@ class ConnectionHandler(object):
         self._connections = []
         self._connection_mapping = {}
 
-    def check_connections(self):
-        return self._check_connections(self._connections)
+    def check_connections(self, timeout=None):
+        return self._check_connections(self._connections, timeout)
 
-    def check_connections_by_id(self, connection_ids):
+    def check_connections_by_id(self, connection_ids, timeout=None):
         connections = []
         for con_id in connection_ids:
             connections.append(self._connection_mapping[con_id])
-        return self._check_connections(connections)
+        return self._check_connections(connections, timeout)
 
-    def _check_connections(self, connections):
+    def _check_connections(self, connections, timeout):
         requests = []
         try:
-            rl, wl, xl = select.select(connections, [], [])
+            rl, wl, xl = select.select(connections, [], [], timeout)
         except select.error:
             return []
         for f in rl:

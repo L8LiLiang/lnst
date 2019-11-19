@@ -25,9 +25,8 @@ def normalize_hwaddr(hwaddr):
 
 def scan_netdevs():
     scan = []
-    ipr = IPRoute()
 
-    try:
+    with IPRoute() as ipr:
         for part in ipr.get_links():
             new_link = {}
             new_link["netlink_msg"] = part
@@ -44,10 +43,6 @@ def scan_netdevs():
             new_link["ip_addrs"] = addrs
 
             scan.append(new_link)
-    except:
-        raise
-    finally:
-        ipr.close()
     return scan
 
 
@@ -136,7 +131,7 @@ class MacPool(AddressPool):
         return bs
 
     def _byte_string_to_addr(self, byte_string):
-        return ':'.join(map(lambda x: "%02x" % x, byte_string))
+        return ':'.join(["%02x" % x for x in byte_string])
 
 
 class IpPool(AddressPool):

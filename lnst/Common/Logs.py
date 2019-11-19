@@ -6,7 +6,7 @@ Licensed under the GNU General Public License, version 2 as
 published by the Free Software Foundation; see COPYING for details.
 """
 
-__autor__ = """
+__author__ = """
 jzupka@redhat.com (Jiri Zupka)
 """
 import os, sys, shutil
@@ -106,7 +106,7 @@ class LoggingCtl:
         logger = logging.getLogger('')
         for i in list(logger.handlers):
             logger.removeHandler(i)
-        for key, logger in logging.Logger.manager.loggerDict.iteritems():
+        for key, logger in list(logging.Logger.manager.loggerDict.items()):
             if type(logger) != type(logging.Logger):
                 continue
             for i in list(logger.handlers):
@@ -218,7 +218,7 @@ class LoggingCtl:
         logger = logging.getLogger()
         logger.addHandler(self.transmit_handler)
 
-        for k in self.slaves.keys():
+        for k in list(self.slaves.keys()):
             self.remove_slave(k)
 
     def cancel_connection(self):
@@ -230,7 +230,7 @@ class LoggingCtl:
     def disable_logging(self):
         self.cancel_connection()
 
-        for s in self.slaves.keys():
+        for s in list(self.slaves.keys()):
             self.remove_slave(s)
 
         self.unset_recipe()

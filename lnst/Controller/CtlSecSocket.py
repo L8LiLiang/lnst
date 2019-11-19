@@ -13,12 +13,10 @@ olichtne@redhat.com (Ondrej Lichtner)
 
 import os
 import hashlib
-import math
 import logging
 from lnst.Common.SecureSocket import SecureSocket
 from lnst.Common.SecureSocket import DH_GROUP, SRP_GROUP
 from lnst.Common.SecureSocket import SecSocketException
-from lnst.Common.Config import lnst_config
 from lnst.Common.Utils import not_imported
 
 ser = not_imported

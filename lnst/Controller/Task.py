@@ -18,6 +18,7 @@ from lnst.Common.Config import lnst_config
 from lnst.Controller.XmlTemplates import XmlTemplateError
 from lnst.Common.Path import Path
 from lnst.Controller.PerfRepoMapping import PerfRepoMapping
+from lnst.Controller.Common import ControllerError
 from lnst.Common.Utils import Noop
 from lnst.Controller.Machine import UnusedInterface
 
@@ -33,20 +34,105 @@ except:
 # The handle to be imported from each task
 ctl = None
 
-class TaskError(Exception): pass
+def get_alias(alias, default=None):
+    return ctl.get_alias(alias, default)
+
+def get_mreq():
+    return ctl.get_mreq()
+
+def wait(seconds):
+    return ctl.wait(seconds)
+
+def get_module(name, options={}):
+    return ctl.get_module(name, options)
+
+def breakpoint():
+    if not ctl.breakpoints:
+        return
+    logging.info("Breakpoint reached. Press enter to continue.")
+    eval(input(""))
+
+def add_host(params={}):
+    m_id = ctl.gen_m_id()
+    ctl.mreq[m_id] = {'interfaces' : {}, 'params' : params}
+    handle =  HostAPI(ctl, m_id)
+    ctl.add_host(m_id, handle)
+    return handle
+
+def match():
+    ctl.cleanup_slaves()
+
+    if ctl.first_run:
+        ctl.first_run = False
+        ctl.set_machine_requirements()
+
+        if ctl.prepare_test_env():
+            if ctl.run_mode == "match_setup":
+                return False
+            if ctl.packet_capture():
+                ctl.start_packet_capture()
+            return True
+    else:
+        if ctl._ctl._multi_match:
+            if ctl.prepare_test_env():
+                if ctl.run_mode == "match_setup":
+                    return False
+                if ctl.packet_capture():
+                    ctl.start_packet_capture()
+                return True
+            else:
+                return False
+        else:
+            return False
+
+
+class TaskError(ControllerError):
+    pass
 
 class ControllerAPI(object):
     """ An API class representing the controller. """
 
-    def __init__(self, ctl, hosts):
+    def __init__(self, ctl):
         self._ctl = ctl
+        self.run_mode = ctl.run_mode
+        self.breakpoints = ctl.breakpoints
         self._result = True
+        self.first_run = True
+        self._m_id_seq = 0
+        self.mreq = {}
 
         self._perf_repo_api = PerfRepoAPI()
 
         self._hosts = {}
-        for host_id, host in hosts.iteritems():
-            self._hosts[host_id] = HostAPI(self, host_id, host)
+
+    def get_mreq(self):
+        return self.mreq
+
+    def cleanup_slaves(self):
+       self._ctl._cleanup_slaves()
+
+    def set_machine_requirements(self):
+        self._ctl.set_machine_requirements()
+
+    def packet_capture(self):
+        return self._ctl._packet_capture
+
+    def start_packet_capture(self):
+        self._ctl._start_packet_capture()
+
+    def prepare_test_env(self):
+        return self._ctl.prepare_test_env()
+
+    def gen_m_id(self):
+        self._m_id_seq += 1
+        return "m_id_%s" % self._m_id_seq
+
+    def add_host(self, host_id, handle):
+        self._hosts[host_id] = handle
+
+    def init_hosts(self, hosts):
+        for host_id, host in list(hosts.items()):
+            self._hosts[host_id].init_host(host)
 
     def _run_command(self, command):
         """
@@ -58,27 +144,6 @@ class ControllerAPI(object):
         res = self._ctl._run_command(command)
         self._result = self._result and res["passed"]
         return res
-
-    def get_host(self, host_id):
-        """
-            Get an API handle for the host from the recipe spec with
-            a specific id.
-
-            :param host_id: id of the host as defined in the recipe
-            :type host_id: string
-
-            :return: The host handle.
-            :rtype: HostAPI
-
-            :raises TaskError: If there is no host with such id.
-        """
-        if host_id not in self._hosts:
-            raise TaskError("Host '%s' not found." % host_id)
-
-        return self._hosts[host_id]
-
-    def get_hosts(self):
-        return self._hosts
 
     def get_module(self, name, options={}):
         """
@@ -105,7 +170,7 @@ class ControllerAPI(object):
         cmd = {"type": "ctl_wait", "seconds": int(seconds)}
         return self._ctl._run_command(cmd)
 
-    def get_alias(self, alias):
+    def get_alias(self, alias, default=None):
         """
             Get the value of user defined alias.
 
@@ -116,9 +181,13 @@ class ControllerAPI(object):
             :rtype: string
         """
         try:
-            return self._ctl._get_alias(alias)
+            val =  self._ctl._get_alias(alias)
+            if val is None:
+                return default
+            else:
+                return val
         except XmlTemplateError:
-            return None
+            return default
 
     def get_aliases(self):
         """
@@ -161,20 +230,20 @@ class ControllerAPI(object):
     def get_configuration(self):
         machines = self._ctl._machines
         configuration = {}
-        for m_id, m in machines.items():
+        for m_id, m in list(machines.items()):
             configuration["machine_"+m_id] = m.get_configuration()
         return configuration
 
     def get_mapping(self):
         match = self._ctl.get_pool_match()
         mapping = []
-        for m_id, m in match["machines"].iteritems():
+        for m_id, m in list(match["machines"].items()):
             machine = {}
             machine["id"] = m_id
             machine["pool_id"] = m["target"]
             machine["hostname"] = m["hostname"]
             machine["interface"] = []
-            for i_id, i in m["interfaces"].iteritems():
+            for i_id, i in list(m["interfaces"].items()):
                 interface = {}
                 interface["id"] = i_id
                 interface["pool_id"] = i["target"]
@@ -186,21 +255,47 @@ class ControllerAPI(object):
 class HostAPI(object):
     """ An API class representing a host machine. """
 
-    def __init__(self, ctl, host_id, host):
+    def __init__(self, ctl, host_id):
         self._ctl = ctl
         self._id = host_id
-        self._m = host
+        self._m = None
 
         self._ifaces = {}
+        self._if_id_seq = 0
+        self._bg_id_seq = 0
+
+    def _gen_if_id(self):
+        self._if_id_seq += 1
+        return "if_id_%s" % self._if_id_seq
+
+    def init_host(self, host):
+        self._m = host
+        self.init_ifaces()
+
+    def init_ifaces(self):
         for interface in self._m.get_interfaces():
             if isinstance(interface, UnusedInterface):
                 continue
-            self._ifaces[interface.get_id()] = InterfaceAPI(interface, self)
+            self._ifaces[interface.get_id()].init_iface(interface)
 
-        self._bg_id_seq = 0
+    def add_interface(self, label, netns=None, params=None):
+        m_id = self.get_id()
+        if_id = self._gen_if_id()
+
+        self._ctl.mreq[m_id]['interfaces'][if_id] = {}
+        self._ctl.mreq[m_id]['interfaces'][if_id]['network'] = label
+        self._ctl.mreq[m_id]['interfaces'][if_id]['netns'] = netns
+
+        if params:
+            self._ctl.mreq[m_id]['interfaces'][if_id]['params'] = params
+        else:
+            self._ctl.mreq[m_id]['interfaces'][if_id]['params'] = {}
+
+        self._ifaces[if_id] = InterfaceAPI(None, self)
+        return self._ifaces[if_id]
 
     def get_id(self):
-        return self._m.get_id()
+        return self._id
 
     def get_configuration(self):
         return self._m.get_configuration()
@@ -253,7 +348,7 @@ class HostAPI(object):
         bg_id = None
         cmd["netns"] = None
 
-        for arg, argval in kwargs.iteritems():
+        for arg, argval in list(kwargs.items()):
             if arg == "bg" and argval == True:
                 self._bg_id_seq += 1
                 cmd["bg_id"] = bg_id = self._bg_id_seq
@@ -305,6 +400,7 @@ class HostAPI(object):
         cmd_res = self._ctl._run_command(cmd)
         return ProcessAPI(self._ctl, self._id, cmd_res, bg_id, cmd["netns"])
 
+<<<<<<< HEAD
     def get_interfaces(self):
         return self._ifaces
 
@@ -425,6 +521,8 @@ class HostAPI(object):
         iface = self._ifaces[if_id]
         return iface.get_ip_prefix(addr_number)
 
+=======
+>>>>>>> jpirko/master
     def sync_resources(self, modules=[], tools=[]):
         res_table = self._ctl._ctl._resource_table
         sync_table = {'module': {}, 'tools': {}}
@@ -656,6 +754,9 @@ class InterfaceAPI(object):
         self._if = interface
         self._host = host
 
+    def init_iface(self, interface):
+        self._if = interface
+
     def get_id(self):
         return self._if.get_id()
 
@@ -680,20 +781,8 @@ class InterfaceAPI(object):
     def get_ips(self, selector={}):
         return VolatileValue(self._if.get_addresses)
 
-    @deprecated
-    def get_ip_addr(self, ip_index=0):
-        return self.get_ip(ip_index)
-
-    @deprecated
-    def get_ip_addrs(self):
-        return self.get_ips()
-
     def get_prefix(self, ip_index=0):
         return VolatileValue(self._if.get_prefix, ip_index)
-
-    @deprecated
-    def get_ip_prefix(self, ip_index=0):
-        return self.get_prefix(ip_index)
 
     def get_mtu(self):
         return VolatileValue(self._if.get_mtu)
@@ -864,7 +953,7 @@ class ModuleAPI(object):
         self._name = module_name
 
         self._opts = {}
-        for opt, val in options.iteritems():
+        for opt, val in list(options.items()):
             self._opts[opt] = []
             if type(val) == list:
                 for v in val:
@@ -877,7 +966,7 @@ class ModuleAPI(object):
 
     def set_options(self, options):
         self._opts = {}
-        for opt, val in options.iteritems():
+        for opt, val in list(options.items()):
             self._opts[opt] = []
             if type(val) == list:
                 for v in val:
@@ -886,7 +975,7 @@ class ModuleAPI(object):
                 self._opts[opt].append({"value": str(val)})
 
     def update_options(self, options):
-        for opt, val in options.iteritems():
+        for opt, val in list(options.items()):
             self._opts[opt] = []
             if type(val) == list:
                 for v in val:
@@ -980,6 +1069,7 @@ class VolatileValue(object):
     def __str__(self):
         return str(self.get_val())
 
+<<<<<<< HEAD
 class PerfRepoAPI(object):
     def __init__(self):
         self._rest_api = None
@@ -1286,3 +1376,5 @@ class PerfRepoBaseline(object):
 
     def get_texec(self):
         return self._texec
+=======
+>>>>>>> jpirko/master

@@ -12,8 +12,9 @@ jpirko@redhat.com (Jiri Pirko)
 
 import logging
 import subprocess
+from lnst.Common.LnstError import LnstError
 
-class ExecCmdFail(Exception):
+class ExecCmdFail(LnstError):
     _cmd = None
     _retval = None
     _stderr = None
@@ -21,6 +22,7 @@ class ExecCmdFail(Exception):
     _report_stderr = None
 
     def __init__(self, cmd=None, retval=None, outs=["", ""], report_stderr=False):
+        self._cmd = cmd
         self._stdout = outs[0]
         self._stderr = outs[1]
         self._retval = retval
@@ -42,7 +44,7 @@ class ExecCmdFail(Exception):
             retval = " (exited with %d)" % self._retval
         if self._report_stderr:
             stderr = " [%s]" % self._stderr
-        return "Command execution failed%s%s" % (retval, stderr)
+        return "Command \"%s\" execution failed%s%s" % (self._cmd, retval, stderr)
 
 def log_output(log_func, out_type, out):
     log_func("%s:\n"
@@ -57,6 +59,8 @@ def exec_cmd(cmd, die_on_err=True, log_outputs=True, report_stderr=False, json=F
     subp = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, close_fds=True)
     (data_stdout, data_stderr) = subp.communicate()
+    data_stdout = data_stdout.decode()
+    data_stderr = data_stderr.decode()
 
     '''
     When we should not die on error, do not print anything and let

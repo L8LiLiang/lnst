@@ -14,75 +14,60 @@ olichtne@redhat.com (Ondrej Lichtner)
 
 import re
 import select
+import socket
 import logging
+<<<<<<< HEAD
 import ethtool
 from lnst.Slave.NetConfigDevice import NetConfigDevice
+=======
+from collections import deque
+>>>>>>> jpirko/master
 from lnst.Slave.NetConfigCommon import get_option
 from lnst.Common.NetUtils import normalize_hwaddr
-from lnst.Common.NetUtils import scan_netdevs
 from lnst.Common.ExecCmd import exec_cmd
 from lnst.Common.ConnectionHandler import recv_data
+from lnst.Common.DeviceError import DeviceNotFound, DeviceConfigError, DeviceDeleted
+from lnst.Common.InterfaceManagerError import InterfaceManagerError
 from lnst.Slave.DevlinkManager import DevlinkManager
 from pyroute2 import IPRSocket
-from pyroute2.netlink.rtnl import RTNLGRP_IPV4_IFADDR
-from pyroute2.netlink.rtnl import RTNLGRP_IPV6_IFADDR
-from pyroute2.netlink.rtnl import RTNLGRP_LINK
-try:
-    from pyroute2.netlink.iproute import RTM_NEWLINK
-    from pyroute2.netlink.iproute import RTM_DELLINK
-    from pyroute2.netlink.iproute import RTM_NEWADDR
-    from pyroute2.netlink.iproute import RTM_DELADDR
-except ImportError:
-    from pyroute2.iproute import RTM_NEWLINK
-    from pyroute2.iproute import RTM_DELLINK
-    from pyroute2.iproute import RTM_NEWADDR
-    from pyroute2.iproute import RTM_DELADDR
+from pyroute2.netlink import NLM_F_REQUEST, NLM_F_DUMP
+from pyroute2.netlink.rtnl import RTMGRP_IPV4_IFADDR
+from pyroute2.netlink.rtnl import RTMGRP_IPV6_IFADDR
+from pyroute2.netlink.rtnl import RTMGRP_LINK
+from pyroute2.netlink.rtnl import RTM_NEWLINK
+from pyroute2.netlink.rtnl import RTM_GETLINK
+from pyroute2.netlink.rtnl import RTM_DELLINK
+from pyroute2.netlink.rtnl import RTM_NEWADDR
+from pyroute2.netlink.rtnl import RTM_GETADDR
+from pyroute2.netlink.rtnl import RTM_DELADDR
 
-class IfMgrError(Exception):
-    pass
-
-NL_GROUPS = RTNLGRP_IPV4_IFADDR | RTNLGRP_IPV6_IFADDR | RTNLGRP_LINK
+NL_GROUPS = RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR | RTMGRP_LINK
 
 class InterfaceManager(object):
     def __init__(self, server_handler):
-        self._devices = {} #if_index to device
-        self._id_mapping = {} #id from the ctl to if_index
-        self._tmp_mapping = {} #id from the ctl to newly created device
+        self._device_classes = {}
+
+        self._devices = {} #ifindex to device
 
         self._nl_socket = IPRSocket()
         self._nl_socket.bind(groups=NL_GROUPS)
 
-        self._dl_manager = DevlinkManager()
+        self._msg_queue = deque()
 
-        self.rescan_devices()
+        #TODO split DevlinkManager away from the InterfaceManager
+        #self._dl_manager = DevlinkManager()
 
         self._server_handler = server_handler
 
-    def map_if(self, if_id, if_index):
-        if if_id in self._id_mapping:
-            raise IfMgrError("Interface already mapped.")
-        elif if_index not in self._devices:
-            raise IfMgrError("No interface with index %s found." % if_index)
+    def clear_dev_classes(self):
+        self._device_classes = {}
 
-        self._id_mapping[if_id] = if_index
-        return
+    def add_device_class(self, name, cls):
+        if name in self._device_classes:
+            raise InterfaceManagerError("Device class name conflict %s" % name)
 
-    def unmap_if(self, if_id):
-        if if_id in self._id_mapping:
-            del self._id_mapping[if_id]
-        elif if_id in self._tmp_mapping:
-            del self._tmp_mapping[if_id]
-        else:
-            pass
-
-    def clear_if_mapping(self):
-        self._id_mapping = {}
-
-    def get_id_by_if_index(self, if_index):
-        for if_id, index in self._id_mapping.iteritems():
-            if if_index == index:
-                return if_id
-        return None
+        self._device_classes[name] = cls
+        return cls
 
     def reconnect_netlink(self):
         if self._nl_socket != None:
@@ -96,139 +81,104 @@ class InterfaceManager(object):
     def get_nl_socket(self):
         return self._nl_socket
 
+    def pull_netlink_messages_into_queue(self):
+        try:
+            while True:
+                rl, wl, xl = select.select([self._nl_socket], [], [], 0)
+                if not len(rl):
+                    break
+                self._msg_queue.extend(self._nl_socket.get())
+        except socket.error:
+            self.reconnect_netlink()
+            return []
+
     def rescan_devices(self):
-        devices_to_remove = self._devices.keys()
-        devs = scan_netdevs()
-        for dev in devs:
-            if dev['index'] not in self._devices:
-                device = None
-                for if_id, d in self._tmp_mapping.items():
-                    d_cfg = d.get_conf_dict()
-                    if d_cfg["name"] == dev["name"]:
-                        device = d
-                        self._id_mapping[if_id] = dev['index']
-                        del self._tmp_mapping[if_id]
-                        break
-                if device == None:
-                    device = Device(self)
-                device.init_netlink(dev['netlink_msg'])
-                self._devices[dev['index']] = device
-            else:
-                self._devices[dev['index']].update_netlink(dev['netlink_msg'])
-                devices_to_remove.remove(dev['index'])
+        self.request_netlink_dump()
+        self.handle_netlink_msgs()
 
-            self._devices[dev['index']].clear_ips()
-            for addr_msg in dev['ip_addrs']:
-                self._devices[dev['index']].update_netlink(addr_msg)
-        for i in devices_to_remove:
-            if self._devices[i].get_netns() != None:
-                continue
+    def request_netlink_dump(self):
+        self._nl_socket.put(
+            None, RTM_GETLINK, msg_flags=NLM_F_REQUEST | NLM_F_DUMP
+        )
+        self._nl_socket.put(
+            None, RTM_GETADDR, msg_flags=NLM_F_REQUEST | NLM_F_DUMP
+        )
 
-            dev_name = self._devices[i].get_name()
-            logging.debug("Deleting Device with if_index %d, name %s because "\
-                          "it doesn't exist anymore." % (i, dev_name))
+    def handle_netlink_msgs(self):
+        self.pull_netlink_messages_into_queue()
 
-            del_msg = {"type": "if_deleted",
-                       "if_index": i}
-            self._server_handler.send_data_to_ctl(del_msg)
-            del self._devices[i]
-
-        self._dl_manager.rescan_ports()
-        for device in self._devices.values():
-            dl_port = self._dl_manager.get_port(device.get_name())
-            device.set_devlink(dl_port)
-
-    def handle_netlink_msgs(self, msgs):
-        for msg in msgs:
+        while len(self._msg_queue):
+            msg = self._msg_queue.popleft()
             self._handle_netlink_msg(msg)
 
-        self._dl_manager.rescan_ports()
-        for device in self._devices.values():
-            dl_port = self._dl_manager.get_port(device.get_name())
-            device.set_devlink(dl_port)
+        # self._dl_manager.rescan_ports()
+        # for device in self._devices.values():
+            # dl_port = self._dl_manager.get_port(device.name)
+            # device._set_devlink(dl_port)
 
     def _handle_netlink_msg(self, msg):
         if msg['header']['type'] in [RTM_NEWLINK, RTM_NEWADDR, RTM_DELADDR]:
             if msg['index'] in self._devices:
-                update_msg = self._devices[msg['index']].update_netlink(msg)
-                if update_msg != None:
-                    for if_id, if_index in self._id_mapping.iteritems():
-                        if if_index == msg['index']:
-                            update_msg["if_id"] = if_id
-                            break
-                    self._server_handler.send_data_to_ctl(update_msg)
+                self._devices[msg['index']]._update_netlink(msg)
             elif msg['header']['type'] == RTM_NEWLINK:
-                dev = None
-                for if_id, d in self._tmp_mapping.items():
-                    d_cfg = d.get_conf_dict()
-                    if d_cfg["name"] == msg.get_attr("IFLA_IFNAME"):
-                        dev = d
-                        self._id_mapping[if_id] = msg['index']
-                        del self._tmp_mapping[if_id]
-                        break
-                if dev == None:
-                    dev = Device(self)
-                update_msg = dev.init_netlink(msg)
+                dev = self._device_classes["Device"](self)
+                dev._init_netlink(msg)
                 self._devices[msg['index']] = dev
 
-                if update_msg != None:
-                    for if_id, if_index in self._id_mapping.iteritems():
-                        if if_index == msg['index']:
-                            update_msg["if_id"] = if_id
-                            break
-                    self._server_handler.send_data_to_ctl(update_msg)
+                update_msg = {"type": "dev_created",
+                              "dev_data": dev._get_if_data()}
+                self._server_handler.send_data_to_ctl(update_msg)
 
+                dev._disable()
         elif msg['header']['type'] == RTM_DELLINK:
             if msg['index'] in self._devices:
                 dev = self._devices[msg['index']]
-                if dev.get_netns() == None and dev.get_conf_dict() == None:
-                    dev.del_link()
-                    del self._devices[msg['index']]
+                dev._deleted = True
 
-                    del_msg = {"type": "if_deleted",
-                               "if_index": msg['index']}
-                    self._server_handler.send_data_to_ctl(del_msg)
+                del self._devices[msg['index']]
+
+                del_msg = {"type": "dev_deleted",
+                           "ifindex": msg['index']}
+                self._server_handler.send_data_to_ctl(del_msg)
         else:
             return
 
-    def get_mapped_device(self, if_id):
-        if if_id in self._id_mapping:
-            if_index = self._id_mapping[if_id]
-            return self._devices[if_index]
-        elif if_id in self._tmp_mapping:
-            return self._tmp_mapping[if_id]
-        else:
-            return None
+    def untrack_device(self, dev):
+        if dev.ifindex in self._devices:
+            del self._devices[dev.ifindex]
 
-    def get_mapped_devices(self):
-        ret = {}
-        for if_id, if_index in self._id_mapping.iteritems():
-            ret[if_id] = self._devices[if_index]
-        for if_id in self._tmp_mapping:
-            ret[if_id] = self._tmp_mapping[if_id]
-        return ret
-
-    def get_device(self, if_index):
-        if if_index in self._devices:
-            return self._devices[if_index]
+    def get_device(self, ifindex):
+        self.rescan_devices()
+        if ifindex in self._devices:
+            return self._devices[ifindex]
         else:
-            return None
+            raise DeviceNotFound()
 
     def get_devices(self):
-        return self._devices.values()
+        self.rescan_devices()
+        return list(self._devices.values())
 
     def get_device_by_hwaddr(self, hwaddr):
-        for dev in self._devices.values():
-            if dev.get_hwaddr() == hwaddr:
+        self.rescan_devices()
+        for dev in list(self._devices.values()):
+            if dev.hwaddr == hwaddr:
                 return dev
-        return None
+        raise DeviceNotFound()
+
+    def get_device_by_name(self, name):
+        self.rescan_devices()
+        for dev in list(self._devices.values()):
+            if dev.name == name:
+                return dev
+        raise DeviceNotFound()
 
     def get_device_by_params(self, params):
+        self.rescan_devices()
         matched = None
-        for dev in self._devices.values():
+        for dev in list(self._devices.values()):
             matched = dev
             dev_data = dev.get_if_data()
-            for key, value in params.iteritems():
+            for key, value in params.items():
                 if key not in dev_data or dev_data[key] != value:
                     matched = None
                     break
@@ -239,64 +189,58 @@ class InterfaceManager(object):
         return matched
 
     def deconfigure_all(self):
-        for dev in self._devices.itervalues():
-            dev.clear_configuration()
+        for dev in self._devices.values():
+            pass
+            # dev.clear_configuration()
 
-    def create_device_from_config(self, if_id, config):
-        if config["type"] == "eth":
-            raise IfMgrError("Ethernet devices can't be created.")
+    def create_device(self, clsname, args=[], kwargs={}):
+        devcls = self._device_classes[clsname]
 
-        config["name"] = self.assign_name(config)
+        try:
+            device = devcls(self, *args, **kwargs)
+        except KeyError as e:
+            raise DeviceConfigError("%s is a mandatory argument" % e)
+        device._create()
+        device._bulk_enabled = False
 
-        device = Device(self)
-        self._tmp_mapping[if_id] = device
+        self.request_netlink_dump()
+        self.pull_netlink_messages_into_queue()
 
-        device.set_configuration(config)
-        device.create()
+        device_found = False
+        while len(self._msg_queue):
+            msg = self._msg_queue.popleft()
+            if msg.get_attr("IFLA_IFNAME") == device.name:
+                device_found = True
+                device._init_netlink(msg)
+                self._devices[msg['index']] = device
+            else:
+                self._handle_netlink_msg(msg)
 
-        return config["name"]
+        if device_found:
+            return device
+        else:
+            raise DeviceError("Device creation failed")
 
-    def create_device_pair(self, if_id1, config1, if_id2, config2):
-        name1, name2 = self.assign_name(config1)
-        config1["name"] = name1
-        config2["name"] = name2
-        config1["peer_name"] = name2
-        config2["peer_name"] = name1
-
-        device1 = Device(self)
-        device2 = Device(self)
-        self._tmp_mapping[if_id1] = device1
-        self._tmp_mapping[if_id2] = device2
-
-        device1.set_configuration(config1)
-        device2.set_configuration(config2)
-        device1.create()
-
-        device1.set_peer(device2)
-        device2.set_peer(device1)
-        return name1, name2
-
-    def wait_interface_init(self):
-        while len(self._tmp_mapping) > 0:
-            rl, wl, xl = select.select([self._nl_socket], [], [], 1)
-
-            if len(rl) == 0:
-                continue
-
-            msgs = recv_data(self._nl_socket)["data"]
-            self.handle_netlink_msgs(msgs)
+    def replace_dev(self, if_id, dev):
+        del self._devices[if_id]
+        self._devices[if_id] = dev
 
     def _is_name_used(self, name):
         self.rescan_devices()
-        for device in self._devices.itervalues():
-            if name == device.get_name():
+        for device in self._devices.values():
+            if name == device.name:
                 return True
-        for device in self._tmp_mapping.itervalues():
-            if name == device.get_name():
-                return True
+
+        out, _ = exec_cmd("ovs-vsctl --columns=name list Interface",
+                          log_outputs=False, die_on_err=False)
+        for line in out.split("\n"):
+            m = re.match(r'.*: \"(.*)\"', line)
+            if m is not None:
+                if name == m.group(1):
+                    return True
         return False
 
-    def assign_name_generic(self, prefix):
+    def assign_name(self, prefix):
         index = 0
         while (self._is_name_used(prefix + str(index))):
             index += 1
@@ -311,6 +255,7 @@ class InterfaceManager(object):
         while (self._is_name_used(prefix + str(index2))):
             index2 += 1
         return prefix + str(index1), prefix + str(index2)
+<<<<<<< HEAD
 
     def assign_name(self, config):
         if "name" in config:
@@ -867,3 +812,5 @@ class Device(object):
             ethtool.set_coalesce(self._name, cdata)
         except IOError as e:
             logging.error("Failed to set coalesce settings: %s", e)
+=======
+>>>>>>> jpirko/master

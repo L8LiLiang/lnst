@@ -6,7 +6,7 @@ Licensed under the GNU General Public License, version 2 as
 published by the Free Software Foundation; see COPYING for details.
 """
 
-__autor__ = """
+__author__ = """
 olichtne@redhat.com (Ondrej Lichtner)
 """
 
@@ -17,11 +17,11 @@ import subprocess
 from lnst.Common.Utils import bool_it
 from lnst.Common.NetUtils import verify_mac_address
 from lnst.Common.Colours import get_preset_conf
-from lnst.Common.Version import LNSTMajorVersion
+from lnst.Common.LnstError import LnstError
 
 DefaultRPCPort = 9999
 
-class ConfigError(Exception):
+class ConfigError(LnstError):
     pass
 
 class Config():
@@ -30,169 +30,10 @@ class Config():
 
     def __init__(self):
         self._options = dict()
-        self.version = self._get_version()
+        self._init_options()
 
-    def _get_version(self):
-        # Check if I'm in git
-        cwd = os.getcwd()
-        abspath = os.path.abspath(__file__)
-        dname = os.path.dirname(abspath)
-        os.chdir(dname)
-        with open(os.devnull, 'w') as null:
-            cmd = ['git', 'rev-parse', 'HEAD']
-            try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=null)
-                data = proc.communicate()
-            except:
-                os.chdir(cwd)
-                return LNSTMajorVersion
-            # git command passed
-            if data[0] != '':
-                version = data[0].strip()
-            # git command failed
-            else:
-                version = LNSTMajorVersion
-        os.chdir(cwd)
-        return version
-
-    def controller_init(self):
-        self._options['environment'] = dict()
-        self._options['environment']['mac_pool_range'] = {\
-                "value" : ['52:54:01:00:00:01', '52:54:01:FF:FF:FF'],
-                "additive" : False,
-                "action" : self.optionMacRange,
-                "name" : "mac_pool_range"}
-        self._options['environment']['rpcport'] = {\
-                "value" : DefaultRPCPort,
-                "additive" : False,
-                "action" : self.optionPort,
-                "name" : "rpcport"}
-        self._options['environment']['tool_dirs'] = {\
-                "value" : [],
-                "additive" : True,
-                "action" : self.optionDirList,
-                "name" : "test_tool_dirs"}
-        self._options['environment']['module_dirs'] = {\
-                "value" : [],
-                "additive" : True,
-                "action" : self.optionDirList,
-                "name" : "test_module_dirs"}
-        self._options['environment']['log_dir'] = {\
-                "value" : os.path.abspath(os.path.join(
-                    os.path.dirname(sys.argv[0]), './Logs')),
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "log_dir"}
-        self._options['environment']['resource_dir'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "resource_dir"}
-        self._options['environment']['xslt_url'] = {
-                "value" : "http://www.lnst-project.org/files/result_xslt/xml_to_html.xsl",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "xslt_url"
-                }
-        self._options['environment']['allow_virtual'] = {
-                "value" : False,
-                "additive" : False,
-                "action" : self.optionBool,
-                "name" : "allow_virtual"
-                }
-
-        self._options['perfrepo'] = dict()
-        self._options['perfrepo']['url'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "url"
-                }
-        self._options['perfrepo']['username'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "username"
-                }
-        self._options['perfrepo']['password'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "password"
-                }
-
-        self._options['pools'] = dict()
-
-        self._options['security'] = dict()
-        self._options['security']['identity'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "identity"}
-        self._options['security']['privkey'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "privkey"}
-
-        self.colours_scheme()
-
-    def slave_init(self):
-        self._options['environment'] = dict()
-        self._options['environment']['log_dir'] = {\
-                "value" : os.path.abspath(os.path.join(
-                    os.path.dirname(sys.argv[0]), './Logs')),
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "log_dir"}
-        self._options['environment']['use_nm'] = {\
-                "value" : True,
-                "additive" : False,
-                "action" : self.optionBool,
-                "name" : "use_nm"}
-        self._options['environment']['rpcport'] = {\
-                "value" : DefaultRPCPort,
-                "additive" : False,
-                "action" : self.optionPort,
-                "name" : "rpcport"}
-
-        self._options['cache'] = dict()
-        self._options['cache']['dir'] = {\
-                "value" : os.path.abspath(os.path.join(
-                    os.path.dirname(sys.argv[0]), './cache')),
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "cache_dir"}
-
-        self._options['cache']['expiration_period'] = {\
-                "value" : 7*24*60*60, # 1 week
-                "additive" : False,
-                "action" : self.optionTimeval,
-                "name" : "expiration_period"}
-
-        self._options['security'] = dict()
-        self._options['security']['auth_types'] = {\
-                "value" : "none",
-                "additive" : False,
-                "action" : self.optionPlain, #TODO list??
-                "name" : "auth_types"}
-        self._options['security']['auth_password'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPlain,
-                "name" : "auth_password"}
-        self._options['security']['privkey'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "privkey"}
-        self._options['security']['ctl_pubkeys'] = {\
-                "value" : "",
-                "additive" : False,
-                "action" : self.optionPath,
-                "name" : "ctl_pubkeys"}
-
-        self.colours_scheme()
+    def _init_options(self):
+        raise NotImplementedError()
 
     def colours_scheme(self):
         self._options['colours'] = dict()
@@ -221,7 +62,7 @@ class Config():
             raise ConfigError(msg)
 
         res = {}
-        for opt_name, opt in self._options[section].items():
+        for opt_name, opt in list(self._options[section].items()):
             res[opt_name] = opt["value"]
         return res
 
@@ -283,7 +124,7 @@ class Config():
         '''Parse and load the config file'''
         exp_path = os.path.expanduser(path)
         abs_path = os.path.abspath(exp_path)
-        print >> sys.stderr, "Loading config file '%s'" % abs_path
+        print("Loading config file '%s'" % abs_path, file=sys.stderr)
         sections = self._parse_file(abs_path)
 
         self.handleSections(sections, abs_path)
@@ -338,7 +179,7 @@ class Config():
 
     def get_pools(self):
         pools = {}
-        for pool_name, pool in self._options["pools"].items():
+        for pool_name, pool in list(self._options["pools"].items()):
             pools[pool_name] = pool["value"]
         return pools
 
@@ -349,7 +190,7 @@ class Config():
             return None
 
     def _find_option_by_name(self, section, opt_name):
-        for option in section.itervalues():
+        for option in section.values():
             if option["name"] == opt_name:
                 return option
         return None
@@ -452,9 +293,3 @@ class Config():
             string = str(value)
 
         return string
-
-#Global object containing lnst configuration, available across modules
-#The object is created here but the contents are initialized
-#in lnst-ctl and lnst-slave, after that the modules that need the configuration
-#just import this object
-lnst_config = Config()

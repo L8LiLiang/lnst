@@ -6,7 +6,7 @@ Licensed under the GNU General Public License, version 2 as
 published by the Free Software Foundation; see COPYING for details.
 """
 
-__autor__ = """
+__author__ = """
 jzupka@redhat.com (Jiri Zupka)
 """
 import functools
@@ -108,6 +108,17 @@ def md5sum(file_path, block_size=2**20):
 
     return md5.hexdigest()
 
+def sha256sum(file_path):
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while True:
+            data = f.read(1024)
+            if not data:
+                break
+            sha256.update(data)
+
+    return sha256.hexdigest()
+
 def create_tar_archive(input_path, target_path, compression=False):
     if compression:
         args = "cfj"
@@ -197,7 +208,7 @@ def get_module_tools(module_path):
     return tools
 
 def recursive_dict_update(original, update):
-    for key, value in update.iteritems():
+    for key, value in list(update.items()):
         if isinstance(value, collections.Mapping):
             r = recursive_dict_update(original.get(key, {}), value)
             original[key] = r
@@ -240,7 +251,7 @@ def list_to_dot(original_list, prefix="", key=""):
 
 def dict_to_dot(original_dict, prefix=""):
     return_list = []
-    for key, value in original_dict.iteritems():
+    for key, value in list(original_dict.items()):
         if isinstance(value, collections.Mapping):
             sub_list = dict_to_dot(value, prefix + key + '.')
             return_list.extend(sub_list)
@@ -260,12 +271,8 @@ def dict_to_dot(original_dict, prefix=""):
 def std_deviation(values):
     if len(values) <= 0:
         return 0.0
-    s1 = 0.0
-    s2 = 0.0
-    for val in values:
-        s1 += val
-        s2 += val**2
-    return (math.sqrt(len(values)*s2 - s1**2))/len(values)
+    avg = sum(values) / float(len(values))
+    return math.sqrt(sum([(float(i) - avg)**2 for i in values])/len(values))
 
 def deprecated(func):
     """

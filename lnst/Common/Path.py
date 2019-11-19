@@ -11,8 +11,9 @@ jtluka@redhat.com (Jan Tluka)
 """
 
 import os
-from urlparse import urljoin
-from urllib2 import urlopen, HTTPError
+from urllib.parse import urljoin
+from urllib.request import urlopen
+from urllib.error import HTTPError
 from tempfile import NamedTemporaryFile
 
 def get_path_class(root, path):
@@ -20,10 +21,7 @@ def get_path_class(root, path):
         if path.startswith('http'):
             return HttpPath(root, path)
         else:
-            if os.access(path, os.R_OK):
-                return FilePath(None, os.path.realpath(path))
-            else:
-                raise Exception("Path does not exist \"%s\"!" % path)
+            return FilePath(None, os.path.realpath(path))
 
     if root.startswith('http'):
         return HttpPath(root, path)
